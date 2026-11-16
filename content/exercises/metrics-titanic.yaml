@@ -1,0 +1,74 @@
+slug: metrics-titanic
+title: Classification Metrics in Detail
+topic: Model Evaluation
+difficulty: Medium
+position: 210
+estimated_minutes: 22
+datasets: [titanic]
+related_lesson: classification-metrics
+objective: Build a confusion matrix, derive precision, recall and F1, and compute ROC AUC.
+instructions:
+  markdown: |
+    Evaluate a logistic-regression classifier on the prepared Titanic split.
+
+    Produce:
+
+    * `cm` — the 2×2 confusion matrix from `confusion_matrix`.
+    * `precision`, `recall`, `f1` — for the positive (survived) class.
+    * `auc` — ROC AUC using predicted probabilities.
+starter_notebook:
+  intro_markdown: |
+    # Classification Metrics in Detail
+
+    **Objective:** read the four confusion-matrix cells, then derive the metrics.
+  cells:
+    - source: |
+        import pandas as pd
+        from sklearn.model_selection import train_test_split
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score, roc_auc_score
+
+        df = pd.read_csv("/opt/opencs/datasets/titanic/v1/titanic.csv")
+        data = df[["survived", "pclass", "sex", "age", "fare", "sibsp", "parch"]].copy()
+        data["sex"] = (data["sex"] == "female").astype(int)
+        data["age"] = data["age"].fillna(data["age"].median())
+        data["fare"] = data["fare"].fillna(data["fare"].median())
+        X = data.drop(columns="survived")
+        y = data["survived"]
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.25, random_state=42, stratify=y
+        )
+        model = LogisticRegression(max_iter=500).fit(X_train, y_train)
+        predictions = model.predict(X_test)
+        probabilities = model.predict_proba(X_test)[:, 1]
+    - source: |
+        cm = None  # TODO
+        precision = None  # TODO
+        recall = None     # TODO
+        f1 = None         # TODO
+        auc = None        # TODO
+        print(cm)
+hints:
+  - "`confusion_matrix(y_test, predictions)`."
+  - "Precision, recall and F1 accept `zero_division=0`."
+  - "AUC needs probabilities, not hard classes."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 90
+  tests:
+    - id: confusion
+      description: the confusion matrix matches the expected cells
+      code: |
+        assert cm.shape == (2, 2), cm
+        assert int(cm[0, 0]) == 112 and int(cm[0, 1]) == 25, cm
+        assert int(cm[1, 0]) == 24 and int(cm[1, 1]) == 62, cm
+    - id: metrics
+      description: precision, recall and F1 match the matrix
+      code: |
+        assert abs(float(precision) - 0.713) < 0.01, precision
+        assert abs(float(recall) - 0.721) < 0.01, recall
+        assert abs(float(f1) - 0.717) < 0.01, f1
+    - id: auc
+      description: ROC AUC is about 0.843
+      code: |
+        assert abs(float(auc) - 0.843) < 0.015, auc

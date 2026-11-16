@@ -1,0 +1,124 @@
+# OpenCS Labs -- example ReadWriteMany StorageClass for the dataset serving tree.
+#
+# WHY THIS EXISTS
+#   The dataset serving tree is written once (by the datasets-sync Job) and read
+#   by up to 450 single-user notebook pods spread across many nodes. That is the
+#   one access pattern ReadWriteOnce cannot serve: a RWO volume can only be
+#   attached to pods on a single node, so at scale most notebook pods would fail
+#   to mount it. ReadOnlyMany would be the natural fit but is deprecated in the
+#   PersistentVolume API and unsupported by most modern CSI drivers.
+#
+#   Hence: ReadWriteMany, backed by a real shared filesystem, mounted with
+#   readOnly: true in every consumer.
+#
+# WHAT TO CHANGE
+#   This is a *template*, not a drop-in. The `provisioner` below is the NFS
+#   subdirectory external provisioner (nfs-subdir-external-provisioner), which
+#   is the most portable choice for an on-premises teaching cluster. Pick the
+#   driver your cluster actually runs:
+#
+#     AWS EFS        efs.csi.aws.com
+#     Azure Files    file.csi.azure.com
+#     GCP Filestore  filestore.csi.storage.gke.io
+#     CephFS         cephfs.csi.ceph.com
+#     Longhorn       driver.longhorn.io         (RWX needs a share-manager)
+#     NFS subdir     nfs.csi.k8s.io             (shown here)
+#
+#   Then update `storageClassName: opencs-rwx` in
+#   infrastructure/kubernetes/datasets-pvc.yaml, or set
+#   datasets.servingPvc.storageClass in the Helm values.
+#
+# TRADE-OFFS TO ACCEPT CONSCIOUSLY
+#   * Every dataset read is a network read. For teaching-sized CSVs and Parquet
+#     samples this is fine; measure before publishing multi-GB tables.
+#   * The storage server is a dependency and a single point of failure. A shared
+#     filesystem outage takes the dataset catalogue down even though MinIO still
+#     holds the canonical objects.
+#   * RWX gives weak POSIX locking. This is acceptable only because the tree is
+#     append-free and write-once -- never build an application that mutates files
+#     in place on this volume.
+#   * `reclaimPolicy: Retain` because re-provisioning it means re-running the
+#     dataset sync, and accidentally deleting the tree mid-semester is a
+#     self-inflicted outage.
+#
+# PER-USER HOME VOLUMES ARE DIFFERENT
+#   Student notebook homes use ReadWriteOnce, one PVC per student, provisioned by
+#   KubeSpawner through the cluster DEFAULT StorageClass (no storageClass is set
+#   in the KubeSpawner storage profile -- see
+#   infrastructure/helm/opencs/values.yaml). They must NOT use this class: RWX
+#   homes would put every student's notebook I/O on the same shared fileserver
+#   and would let a chatty filesystem server slow every session at once. Leave
+#   the per-user class RWO and block-backed.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: opencs-rwx
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/component: storage
+  annotations:
+    # Not the cluster default: only the dataset PVC should opt in by name.
+    storageclass.kubernetes.io/is-default-class: "false"
+    opencs.example.edu/purpose: "ReadWriteMany volume for the read-only dataset serving tree"
+# Replace with your cluster's shared-filesystem CSI driver.
+provisioner: nfs.csi.k8s.io
+parameters:
+  # nfs.csi.k8s.io parameters. Point these at your NFS export; the provisioner
+  # creates one subdirectory per PVC underneath it.
+  server: "nfs.example.edu"
+  share: "/export/opencs-datasets"
+  # Keep the tree world-readable so uid/gid 1000 notebook pods can read it
+  # without matching the writer's uid. The dataset Job chmods the tree to
+  # 0555/0444 as well, so this is belt-and-braces.
+  mountPermissions: "0755"
+# Dataset files must survive a PVC delete/release. The serving tree is derived
+# data, but re-materialising it takes minutes and a mid-lab outage is worse than
+# an operator having to clean up by hand.
+reclaimPolicy: Retain
+# The dataset PVC was already provisioned as RWX; immediate binding keeps the
+# sync Job from waiting on a WaitForFirstConsumer scheduling decision.
+volumeBindingMode: Immediate
+# Allow online expansion so the tree can grow when a new dataset version lands
+# without recreating the PVC (the CSI driver must support it).
+allowVolumeExpansion: true
+mountOptions:
+  # NFSv4.1 is the minimum version with session trunking and better locking.
+  - nfsvers=4.1
+  # Read-mostly, huge numbers of concurrent readers: raise the attribute-cache
+  # lifetime so the same inode metadata is not re-fetched per import.
+  - acregmin=600
+  - acregmax=600
+  - actimeo=60
+  # Fail loudly and quickly instead of hanging a notebook kernel forever when
+  # the fileserver disappears.
+  - hard
+  - timeo=600
+  - retrans=2
+  - noresvport
+---
+# Example per-user home class, for clusters where the default class is not
+# suitable. Notebook homes stay ReadWriteOnce and block-backed: one volume per
+# student, no shared fileserver in the hot path.
+#
+# Leave this out if the cluster default is already a sensible RWO CSI class --
+# KubeSpawner uses the default when its `storageClass` is empty.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: opencs-user-home
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/component: storage
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+    opencs.example.edu/purpose: "ReadWriteOnce per-student notebook home"
+# Replace with your block-storage CSI driver (ebs.csi.aws.com, pd.csi.storage.gke.io,
+# csi.hetzner.cloud, ...).
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  encrypted: "true"
+reclaimPolicy: Retain
+# Bind on first use so the volume is created in the same zone as the notebook pod.
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

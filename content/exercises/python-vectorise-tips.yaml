@@ -1,0 +1,70 @@
+slug: python-vectorise-tips
+title: Replace a Loop with Vectorised Pandas
+topic: Python for Data Analysis
+difficulty: Easy
+position: 30
+estimated_minutes: 15
+datasets: [tips]
+related_lesson: python-essentials-for-analysis
+objective: Derive a new column with vectorised arithmetic and aggregate it by group.
+instructions:
+  markdown: |
+    The starter notebook computes a tip percentage with a Python loop.
+    Replace that with vectorised pandas code.
+
+    Produce:
+
+    * `df` with a `tip_pct` column (tip divided by total_bill, times 100).
+    * `day_medians` — median `tip_pct` per day.
+    * `highest_day` — the day with the highest median tip percentage.
+starter_notebook:
+  intro_markdown: |
+    # Vectorise the Tip Percentage
+
+    **Objective:** replace a row loop with column arithmetic, then aggregate.
+
+    Compare your vectorised result with the loop result before evaluating.
+  cells:
+    - source: |
+        import pandas as pd
+
+        df = pd.read_csv("/opt/opencs/datasets/tips/v1/tips.csv")
+        loop_values = [tip / bill * 100 for tip, bill in zip(df["tip"], df["total_bill"])]
+        print([round(v, 2) for v in loop_values[:5]])
+    - cell_type: markdown
+      source: |
+        ## Vectorised version
+
+        Create the `tip_pct` column without a loop.
+    - source: |
+        # TODO: df["tip_pct"] = ...
+        print(df[["tip", "total_bill", "tip_pct"]].head() if "tip_pct" in df else "not yet")
+    - source: |
+        day_medians = None  # TODO
+        highest_day = None  # TODO
+        print(day_medians)
+hints:
+  - "Pandas applies arithmetic to whole columns: `df[\"tip\"] / df[\"total_bill\"] * 100`."
+  - "Group and aggregate with `df.groupby(\"day\")[\"tip_pct\"].median()`."
+  - "`idxmax()` gives the label of the largest value."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 60
+  tests:
+    - id: column-created
+      description: tip_pct matches the loop result and has 244 rows
+      code: |
+        assert "tip_pct" in df.columns, "tip_pct column missing"
+        assert len(df) == 244
+        assert abs(float(df["tip_pct"].iloc[0]) - 5.94) < 0.02, float(df["tip_pct"].iloc[0])
+        assert abs(float(df["tip_pct"].mean()) - 16.08) < 0.2
+    - id: grouped-median
+      description: day_medians has the correct Sunday median
+      code: |
+        assert day_medians is not None
+        assert len(day_medians) == 4
+        assert abs(float(day_medians.loc["Sun"]) - 16.11) < 0.1
+    - id: highest-day
+      description: highest_day is Sunday
+      code: |
+        assert str(highest_day) == "Sun", highest_day

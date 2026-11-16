@@ -1,0 +1,13 @@
+# The notebook image build context is the repository root (the Dockerfile's
+# extension stage copies jupyterlab-extension/). Everything else is excluded so
+# the context stays small.
+**
+!notebook-image/Dockerfile
+!notebook-image/grade_runner.py
+!notebook-image/requirements.in
+!notebook-image/requirements.lock
+!jupyterlab-extension/package.json
+!jupyterlab-extension/tsconfig.json
+!jupyterlab-extension/src/**
+!jupyterlab-extension/schema/**
+!jupyterlab-extension/style/**

@@ -1,0 +1,18 @@
+{{- $component := printf "%s-backend" (include "opencs.fullname" .) -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $component }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "opencs.componentLabels" (dict "root" . "component" $component) | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: {{ .Values.backend.service.type }}
+  selector:
+    {{- include "opencs.componentSelectorLabels" (dict "root" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.backend.service.port }}
+      targetPort: {{ .Values.backend.service.targetPort }}
+      protocol: TCP

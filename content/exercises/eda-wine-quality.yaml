@@ -1,0 +1,65 @@
+slug: eda-wine-quality
+title: First-Pass EDA on Wine Quality
+topic: Exploratory Data Analysis
+difficulty: Medium
+position: 100
+estimated_minutes: 20
+datasets: [wine-quality]
+related_lesson: descriptive-statistics
+objective: Produce a structured first-pass summary including shape, distribution counts and skew.
+instructions:
+  markdown: |
+    Work with the red wine table.
+
+    Produce:
+
+    * `wine` — the loaded DataFrame.
+    * `quality_counts` — value counts of `quality`, sorted by quality value.
+    * `alcohol_skew` — the skew of the `alcohol` column.
+    * `top_quality` — the most common quality score.
+    * `summary` — `wine.describe().T` (summary statistics per column).
+starter_notebook:
+  intro_markdown: |
+    # First-Pass EDA on Wine Quality
+
+    **Objective:** answer "what is in this table?" before asking any modelling question.
+  cells:
+    - source: |
+        import pandas as pd
+
+        wine = pd.read_csv("/opt/opencs/datasets/wine-quality/v1/winequality-red.csv")
+        print(wine.shape)
+        wine.head()
+    - source: |
+        quality_counts = None  # TODO
+        top_quality = None     # TODO
+        print(quality_counts)
+    - source: |
+        alcohol_skew = None  # TODO
+        summary = None       # TODO
+        print(alcohol_skew)
+hints:
+  - "`value_counts()` gives counts; add `.sort_index()` to order by score."
+  - "`Series.skew()` computes the skew."
+  - "`mode()[0]` gives the most common quality value."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 60
+  tests:
+    - id: shape
+      description: wine has 1599 rows and 12 columns
+      code: |
+        assert wine.shape == (1599, 12)
+    - id: distribution
+      description: quality counts and top score are correct
+      code: |
+        assert int(quality_counts.loc[5]) == 681
+        assert int(quality_counts.loc[8]) == 18
+        assert int(top_quality) == 5
+    - id: summary
+      description: skew and describe table are present
+      code: |
+        assert abs(float(alcohol_skew) - 0.861) < 0.01, alcohol_skew
+        assert summary is not None
+        assert {"mean", "std", "min", "max"}.issubset(summary.columns)
+        assert abs(float(summary.loc["alcohol", "mean"]) - 10.42) < 0.01

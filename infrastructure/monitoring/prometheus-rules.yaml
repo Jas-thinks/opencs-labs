@@ -1,0 +1,337 @@
+# OpenCS Labs -- Prometheus alerting rules.
+#
+# Alerts are grouped by the plane that owns them:
+#   opencs-api    the FastAPI application (errors, latency, availability)
+#   opencs-hub    JupyterHub + KubeSpawner (spawn failures, capacity, scheduling)
+#   opencs-infra  PostgreSQL, MinIO, storage and node pressure
+#
+# Metric sources
+#   * backend: opencs_http_requests_total, opencs_http_request_duration_seconds,
+#     opencs_notebook_launches_total, opencs_notebook_launch_duration_seconds,
+#     opencs_active_notebook_sessions, opencs_grader_runs_total,
+#     opencs_grader_duration_seconds (backend/app/core/metrics.py)
+#   * hub: jupyterhub_* and the KubeSpawner/prometheus-client series exposed by
+#     the hub when metrics are enabled
+#   * cluster: kube-state-metrics, node-exporter and kubelet (kube-prometheus-stack)
+#
+# Every alert carries severity (page/ticket), a human summary and a
+# description with the observed value, plus a runbook_url pointing at the
+# operations docs. `for:` durations are deliberately long enough to survive a
+# single scrape gap and short enough to page before students notice.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: opencs-alerts
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/component: monitoring
+    # Must match the Prometheus Operator's ruleSelector (kube-prometheus-stack
+    # default selects `release: <helm-release-name>`).
+    release: kube-prometheus-stack
+spec:
+  groups:
+    # ---------------------------------------------------------------------
+    # API plane
+    # ---------------------------------------------------------------------
+    - name: opencs-api
+      interval: 30s
+      rules:
+        - alert: OpenCSApiHigh5xxRate
+          # Share of 5xx responses over all non-probe API responses in 5 min.
+          expr: |
+            (
+              sum(rate(opencs_http_requests_total{job="opencs-backend",status=~"5.."}[5m]))
+              /
+              clamp_min(sum(rate(opencs_http_requests_total{job="opencs-backend"}[5m])), 0.001)
+            ) > 0.02
+            and
+            sum(rate(opencs_http_requests_total{job="opencs-backend"}[5m])) > 0.5
+          for: 5m
+          labels:
+            severity: page
+            component: api
+          annotations:
+            summary: "OpenCS API is returning >2% 5xx responses"
+            description: >-
+              {{ $value | humanizePercentage }} of API requests over the last 5
+              minutes failed with a 5xx status, sustained for 5m. Check the
+              backend logs and the upstream dependencies (PostgreSQL, MinIO,
+              JupyterHub) before rolling back.
+            runbook_url: "https://github.com/opencs-labs/opencs-labs/blob/main/docs/OPERATIONS.md#api-5xx"
+
+        - alert: OpenCSApiHighP95Latency
+          # p95 of request latency across all routes, 10 min window.
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (rate(opencs_http_request_duration_seconds_bucket{job="opencs-backend"}[10m]))
+            ) > 1.5
+          for: 10m
+          labels:
+            severity: ticket
+            component: api
+          annotations:
+            summary: "OpenCS API p95 latency above 1.5s"
+            description: >-
+              The 10-minute p95 API latency is {{ $value | humanizeDuration }}.
+              The catalogue contract targets p95 < 500ms for dataset queries
+              (HLD 5.1). Check database connections and query latency first.
+            runbook_url: "https://github.com/opencs-labs/opencs-labs/blob/main/docs/OPERATIONS.md#api-latency"
+
+        - alert: OpenCSBackendDown
+          # Fewer ready backend pods than the PDB floor. Uses kube-state-metrics
+          # so it fires even when the process cannot scrape itself.
+          expr: |
+            kube_deployment_status_replicas_available{namespace="opencs", deployment="opencs-backend"} < 1
+          for: 2m
+          labels:
+            severity: page
+            component: api
+          annotations:
+            summary: "No OpenCS backend replica is available"
+            description: >-
+              Deployment opencs-backend has
+              {{ $value | humanize }} available replica(s). The API, dataset
+              catalogue and notebook launch orchestration are all unavailable to
+              students.
+            runbook_url: "https://github.com/opencs-labs/opencs-labs/blob/main/docs/OPERATIONS.md#backend-down"
+
+        - alert: OpenCSBackendReadinessFailing
+          # Pods exist and are Running but the /ready probe keeps failing, which
+          # almost always means the database is unreachable.
+          expr: |
+            kube_deployment_status_replicas_ready{namespace="opencs", deployment="opencs-backend"}
+            <
+            kube_deployment_spec_replicas{namespace="opencs", deployment="opencs-backend"}
+          for: 10m
+          labels:
+            severity: page
+            component: api
+          annotations:
+            summary: "OpenCS backend readiness below desired replica count"
+            description: >-
+              {{ $value | humanize }} of the desired backend replicas have been
+              failing the /ready probe (which executes `SELECT 1`) for 10m.
+              Check PostgreSQL availability and the OPENCE_DATABASE_URL secret.
+            runbook_url: "https://github.com/opencs-labs/opencs-labs/blob/main/docs/OPERATIONS.md#readiness"
+
+    # ---------------------------------------------------------------------
+    # Notebook plane
+    # ---------------------------------------------------------------------
+    - name: opencs-hub
+      interval: 30s
+      rules:
+        - alert: OpenCSNotebookSpawnFailures
+          # More than 5% of spawn attempts failing over 15 minutes means students
+          # cannot start notebooks. A handful of individual failures is normal
+          # (pod evictions, idle culls racing a launch).
+          expr: |
+            (
+              sum(rate(opencs_notebook_launches_total{job="opencs-backend",result="failure"}[15m]))
+              /
+              clamp_min(sum(rate(opencs_notebook_launches_total{job="opencs-backend"}[15m])), 0.001)
+            ) > 0.05
+            and
+            sum(increase(opencs_notebook_launches_total{job="opencs-backend"}[15m])) > 3
+          for: 15m
+          labels:
+            severity: page
+            component: hub
+          annotations:
+            summary: "Notebook spawn failure rate above 5%"
+            description: >-
+              {{ $value | humanizePercentage }} of notebook launch attempts
+              failed over 15m. Typical causes: image pull errors, insufficient
+              cluster capacity, PVC attach failures, or the Hub rejecting
+              spawns. Check `kubectl -n opencs-hub get events --sort-by=.lastTimestamp`
+              and the hub logs.
+            runbook_url: "https://github.com/opencs-labs/opencs-labs/blob/main/docs/OPERATIONS.md#spawn-failures"
+
+        - alert: OpenCSHubUserCountNearCapacity
+          # 450 active sessions is the hard admission ceiling
+          # (OPENCE_MAX_ACTIVE_SESSIONS); 400 is the target peak. Warn at 80% so
+          # there is time to add nodes before launches start being rejected.
+          expr: |
+            max(opencs_active_notebook_sessions{job="opencs-backend"}) > 360
+          for: 10m
+          labels:
+            severity: ticket
+            component: hub
+          annotations:
+            summary: "Active notebook sessions approaching the 450-session ceiling"
+            description: >-
+              {{ $value | humanize }} notebook sessions are active, above 80% of
+              the 450 admission ceiling (target peak is 400). New launches will
+              be rejected above 450. Review node capacity and idle-cull policy.
+            runbook_url: "https://github.com/opencs-labs/opencs-labs/blob/main/docs/OPERATIONS.md#capacity"
+
+        - alert: OpenCSNotebookPodPendingTooLong
+          # A single-user pod that cannot be scheduled for 5 minutes is a
+          # student staring at a spinner. Distinguish "no nodes" from "no CPU".
+          expr: |
+            max by (namespace, pod) (
+              kube_pod_status_phase{namespace="opencs-hub", phase="Pending"} == 1
+            )
+            and on (namespace, pod)
+            max by (namespace, pod) (
+              kube_pod_created{namespace="opencs-hub"}
+            ) < (time() - 300)
+          for: 5m
+          labels:
+            severity: ticket
+            component: hub
+          annotations:
+            summary: "Notebook pod {{ $labels.pod }} has been Pending for over 5 minutes"
+            description: >-
+              Pod {{ $labels.pod }} in {{ $labels.namespace }} could not be
+              scheduled for more than 5 minutes. Check
+              `kubectl -n opencs-hub describe pod {{ $labels.pod }}` for
+              FailedScheduling events (insufficient cpu/memory, volume attach,
+              or node affinity).
+            runbook_url: "https://github.com/opencs-labs/opencs-labs/blob/main/docs/OPERATIONS.md#pending-pods"
+
+        - alert: OpenCSNotebookSpawnSlow
+          # p95 spawn time above 120s: the configured launch timeout
+          # (OPENCE_NOTEBOOK_START_TIMEOUT_SECONDS) will start failing requests.
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (rate(opencs_notebook_launch_duration_seconds_bucket[15m]))
+            ) > 120
+          for: 15m
+          labels:
+            severity: ticket
+            component: hub
+          annotations:
+            summary: "Notebook spawn p95 latency above the 120s launch timeout"
+            description: >-
+              p95 time from launch request to a ready notebook server is
+              {{ $value | humanizeDuration }} over 15m, which exceeds the
+              configured timeout. Investigate image pull time and PVC
+              attach/mount latency before increasing the timeout.
+            runbook_url: "https://github.com/opencs-labs/opencs-labs/blob/main/docs/OPERATIONS.md#spawn-latency"
+
+    # ---------------------------------------------------------------------
+    # Infrastructure plane
+    # ---------------------------------------------------------------------
+    - name: opencs-infra
+      interval: 30s
+      rules:
+        - alert: OpenCSPostgresDown
+          expr: |
+            kube_statefulset_status_replicas_ready{namespace="opencs", statefulset="postgres"} < 1
+          for: 3m
+          labels:
+            severity: page
+            component: database
+          annotations:
+            summary: "PostgreSQL has no ready replica"
+            description: >-
+              The postgres StatefulSet in namespace opencs has
+              {{ $value | humanize }} ready replica(s). All metadata operations
+              fail while this alert is active. Check the pod logs and the PVC
+              attachment; do not delete the PVC.
+            runbook_url: "https://github.com/opencs-labs/opencs-labs/blob/main/docs/OPERATIONS.md#postgres-down"
+
+        - alert: OpenCSMinioDown
+          expr: |
+            kube_statefulset_status_replicas_ready{namespace="opencs", statefulset="minio"} < 1
+          for: 3m
+          labels:
+            severity: page
+            component: object-storage
+          annotations:
+            summary: "MinIO has no ready replica"
+            description: >-
+              The minio StatefulSet in namespace opencs has
+              {{ $value | humanize }} ready replica(s). Dataset publication and
+              any object read/write fails. Already-mounted dataset files remain
+              readable from the serving PVC.
+            runbook_url: "https://github.com/opencs-labs/opencs-labs/blob/main/docs/OPERATIONS.md#minio-down"
+
+        - alert: OpenCSPersistentVolumeFillingUp
+          # Applies to the dataset serving PVC and the per-student home PVCs.
+          # Read-only dataset volumes should never grow, so this almost always
+          # fires for user homes.
+          expr: |
+            (
+              kubelet_volume_stats_available_bytes{namespace=~"opencs|opencs-hub", job="kubelet"}
+              /
+              kubelet_volume_stats_capacity_bytes{namespace=~"opencs|opencs-hub", job="kubelet"}
+            ) < 0.15
+            and
+            kubelet_volume_stats_used_bytes{namespace=~"opencs|opencs-hub", job="kubelet"} > 0
+          for: 15m
+          labels:
+            severity: ticket
+            component: storage
+          annotations:
+            summary: "PVC {{ $labels.persistentvolumeclaim }} is more than 85% full"
+            description: >-
+              PVC {{ $labels.persistentvolumeclaim }} in {{ $labels.namespace }}
+              has only {{ $value | humanizePercentage }} of its capacity free,
+              sustained for 15m. For a student home, ask the student to remove
+              large files or raise the quota deliberately; for the dataset PVC,
+              a growth means a bad sync wrote into the read-only tree.
+            runbook_url: "https://github.com/opencs-labs/opencs-labs/blob/main/docs/OPERATIONS.md#pvc-capacity"
+
+        - alert: OpenCSNodeMemoryPressure
+          # Notebook pods are the biggest memory consumers; node pressure is the
+          # leading indicator of OOM kills and pod evictions during a lab peak.
+          expr: |
+            (
+              1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+            ) > 0.90
+          for: 10m
+          labels:
+            severity: ticket
+            component: node
+          annotations:
+            summary: "Node {{ $labels.instance }} memory usage above 90%"
+            description: >-
+              Node {{ $labels.instance }} has
+              {{ $value | humanizePercentage }} of its memory in use for 10m.
+              Expect OOMKilled notebook pods and evictions. Add capacity or
+              lower the per-session memory profile before the next lab session.
+            runbook_url: "https://github.com/opencs-labs/opencs-labs/blob/main/docs/OPERATIONS.md#node-pressure"
+
+        - alert: OpenCSNodeCPUHigh
+          # Sustained CPU saturation slows kernels and delays spawns.
+          expr: |
+            (
+              1 - avg by (instance) (
+                rate(node_cpu_seconds_total{mode="idle"}[10m])
+              )
+            ) > 0.90
+          for: 15m
+          labels:
+            severity: ticket
+            component: node
+          annotations:
+            summary: "Node {{ $labels.instance }} CPU usage above 90%"
+            description: >-
+              Node {{ $labels.instance }} has been running at
+              {{ $value | humanizePercentage }} CPU utilisation for 15m.
+              Student kernels will feel slow and spawns will queue.
+            runbook_url: "https://github.com/opencs-labs/opencs-labs/blob/main/docs/OPERATIONS.md#node-pressure"
+
+        - alert: OpenCSGraderFailures
+          # Automated practice evaluation is a core feature; a failing grader
+          # silently removes feedback from every exercise.
+          expr: |
+            (
+              sum(rate(opencs_grader_runs_total{job="opencs-backend",result="failure"}[15m]))
+              /
+              clamp_min(sum(rate(opencs_grader_runs_total{job="opencs-backend"}[15m])), 0.001)
+            ) > 0.10
+          for: 15m
+          labels:
+            severity: ticket
+            component: grader
+          annotations:
+            summary: "Practice grader failure rate above 10%"
+            description: >-
+              {{ $value | humanizePercentage }} of grader runs failed over 15m.
+              Check the grading sandbox image, timeouts and disk space.
+            runbook_url: "https://github.com/opencs-labs/opencs-labs/blob/main/docs/OPERATIONS.md#grader"

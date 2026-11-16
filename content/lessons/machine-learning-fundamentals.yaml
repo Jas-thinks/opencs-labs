@@ -1,0 +1,223 @@
+slug: machine-learning-fundamentals
+title: Machine Learning Fundamentals
+description: Features, labels, train/test splits, leakage and the baseline every model must beat.
+
+lessons:
+  - slug: train-test-split
+    title: Features, Labels and Train/Test Split
+    objective: Build a feature matrix and label vector, split them correctly, and compare a model against a trivial baseline.
+    summary: Predict Titanic survival with a logistic regression and discover why 76% accuracy is only modestly better than guessing "did not survive" (61.6%).
+    estimated_minutes: 18
+    datasets: [titanic]
+    exercises: [split-titanic]
+    notebook_activity:
+      title: A first supervised learning pipeline
+      intro_markdown: |
+        # Train/Test Split
+
+        A model that has seen the test data is not being evaluated — it is being
+        remembered. This activity builds an honest split and a baseline.
+      cells:
+        - source: |
+            import pandas as pd
+            from sklearn.model_selection import train_test_split
+            from sklearn.linear_model import LogisticRegression
+            from sklearn.metrics import accuracy_score
+
+            df = pd.read_csv("/opt/opencs/datasets/titanic/v1/titanic.csv")
+            data = df[["survived", "pclass", "sex", "age", "fare"]].copy()
+            data["sex"] = (data["sex"] == "female").astype(int)
+            data["age"] = data["age"].fillna(data["age"].median())
+            data["fare"] = data["fare"].fillna(data["fare"].median())
+            X = data.drop(columns="survived")
+            y = data["survived"]
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.25, random_state=42, stratify=y
+            )
+            print(X_train.shape, X_test.shape)
+        - cell_type: markdown
+          source: |
+            ## Baseline first
+
+            Always predict the majority class before training a model.
+        - source: |
+            baseline = (y_test == y_test.mode()[0]).mean()
+            print("majority-class accuracy:", round(baseline, 3))
+        - source: |
+            model = LogisticRegression(max_iter=500).fit(X_train, y_train)
+            print("model accuracy:", round(accuracy_score(y_test, model.predict(X_test)), 3))
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                The Titanic table has 891 passengers and a binary label: `survived`.
+                Before any model, note the class balance: 549 passengers did not
+                survive (61.6%), 342 did (38.4%). A model that always predicts "did
+                not survive" is already 61.6% accurate. Any model must beat that
+                baseline to be worth anything.
+            - type: table
+              caption: Class balance in the Titanic table.
+              columns:
+                - {key: outcome, label: outcome}
+                - {key: passengers, label: passengers}
+                - {key: share, label: share}
+              rows:
+                - {outcome: Did not survive, passengers: 549, share: "61.6%"}
+                - {outcome: Survived, passengers: 342, share: "38.4%"}
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: steps
+              items:
+                - title: Choose features
+                  text: Columns the model may use — class, sex, age, fare.
+                - title: Choose a label
+                  text: The outcome to predict — survived.
+                - title: Split
+                  text: Hold out a test set the model never sees during training.
+                - title: Fit
+                  text: Learn parameters from the training rows only.
+                - title: Evaluate
+                  text: Measure performance on the held-out rows and compare with the baseline.
+            - type: callout
+              variant: warning
+              title: Leakage is the classic mistake
+              text: |
+                If you compute a fill value, a scaler, or a target encoding using the
+                whole dataset before splitting, information from the test set leaks
+                into training. Fit preprocessing on the training split only.
+            - type: markdown
+              text: |
+                `stratify=y` preserves the class ratio in both splits. Without it, a
+                small dataset can produce a test set with a very different balance
+                purely by chance.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              source: |
+                import pandas as pd
+
+                df = pd.read_csv("/opt/opencs/datasets/titanic/v1/titanic.csv")
+                print(df["survived"].value_counts())
+                print("missing age:", int(df["age"].isna().sum()))
+            - type: output
+              kind: text
+              text: |
+                survived
+                0    549
+                1    342
+                Name: count, dtype: int64
+                missing age: 177
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              caption: Split first, then fit on training data only.
+              source: |
+                from sklearn.model_selection import train_test_split
+                from sklearn.linear_model import LogisticRegression
+                from sklearn.metrics import accuracy_score
+
+                data = df[["survived", "pclass", "sex", "age", "fare"]].copy()
+                data["sex"] = (data["sex"] == "female").astype(int)
+                data["age"] = data["age"].fillna(data["age"].median())
+                data["fare"] = data["fare"].fillna(data["fare"].median())
+
+                X = data.drop(columns="survived")
+                y = data["survived"]
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=0.25, random_state=42, stratify=y
+                )
+                model = LogisticRegression(max_iter=500).fit(X_train, y_train)
+                print("train:", len(X_train), "test:", len(X_test))
+                print("accuracy:", round(accuracy_score(y_test, model.predict(X_test)), 3))
+            - type: output
+              kind: text
+              text: |
+                train: 668 test: 223
+                accuracy: 0.762
+            - type: code
+              language: python
+              caption: The baseline is the number to beat.
+              source: |
+                baseline = (y_test == y_test.mode()[0]).mean()
+                print("majority baseline:", round(baseline, 3))
+            - type: output
+              kind: text
+              text: "majority baseline: 0.614"
+            - type: callout
+              variant: info
+              title: 76% vs 61% is a real gain, but not a solved problem
+              text: |
+                The model adds roughly 15 percentage points over always guessing. It is
+                useful, imperfect, and built on a small historical sample. Always report
+                both numbers.
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: chart
+              title: Accuracy against the majority-class baseline
+              caption: The model must clear the baseline to justify its complexity.
+              spec:
+                type: bar
+                x: approach
+                y: accuracy
+                data:
+                  - {approach: Majority baseline, accuracy: 0.614}
+                  - {approach: Logistic regression, accuracy: 0.762}
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: "99% accuracy on the training set"
+                  explanation: The model memorised the training rows.
+                  fix: Evaluate on held-out data; check for leakage and overfitting.
+                - error: "The test set was used repeatedly to tune choices"
+                  explanation: The test set has effectively become a validation set.
+                  fix: Use a validation split or cross-validation; touch test once at the end.
+                - error: "`train_test_split` produced inconsistent results"
+                  explanation: No random seed was set.
+                  fix: Pass `random_state` for reproducibility.
+                - error: "Features include the label or a proxy for it"
+                  explanation: Leakage makes performance look excellent and be useless.
+                  fix: Audit each feature for availability at prediction time.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The exercise asks you to build a leakage-free split, report baseline
+                and model accuracy, and explain the difference.
+            - type: checklist
+              items:
+                - "I can name features and label and explain the distinction."
+                - "I split before fitting any preprocessing."
+                - "I report a majority-class baseline."
+                - "I check for leakage and use a fixed random seed."
+      takeaways:
+        - A label is what you predict; features are what you are allowed to know.
+        - Split before preprocessing to avoid leakage.
+        - Stratification preserves class balance in small datasets.
+        - Always compare a model with a trivial baseline.
+      glossary:
+        - term: Feature
+          definition: An input variable used by a model.
+        - term: Label
+          definition: The target outcome being predicted.
+        - term: Data leakage
+          definition: Using information unavailable at prediction time, or test information during training.
+        - term: Baseline
+          definition: A simple reference model, often the majority class.

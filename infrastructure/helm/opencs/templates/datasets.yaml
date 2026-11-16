@@ -1,0 +1,86 @@
+{{/*
+Read-only dataset serving PVC.
+
+Notebook pods, the backend and grading Jobs all mount this tree read-only at
+/opt/opencs/datasets. It must be backed by a ReadWriteMany StorageClass
+(see storage/storageclass-rwx.yaml) because more than one node mounts it.
+
+Set `datasets.servingPvc.create=false` when the PVC is provisioned outside the
+chart (an operator, a static PV, or an NFS export).
+*/}}
+{{- if and .Values.datasets.servingPvc.create .Values.datasets.servingPvc.name }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.datasets.servingPvc.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "opencs.labels" . | nindent 4 }}
+    app.kubernetes.io/component: datasets
+spec:
+  accessModes:
+    {{- toYaml .Values.datasets.servingPvc.accessModes | nindent 4 }}
+  {{- with .Values.datasets.servingPvc.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.datasets.servingPvc.size }}
+{{- end }}
+{{- if .Values.datasets.sync.enabled }}
+---
+{{/*
+Dataset sync Job: uploads datasets/serving to MinIO and materialises the
+serving tree on the PVC. Idempotent; safe to re-run.
+
+`datasets.sync.schedule` empty renders a one-shot Job. A cron string renders a
+CronJob instead so the serving tree can be refreshed on a timetable.
+*/}}
+{{- if .Values.datasets.sync.schedule }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "opencs.fullname" . }}-datasets-sync
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "opencs.labels" . | nindent 4 }}
+    app.kubernetes.io/component: datasets-sync
+spec:
+  schedule: {{ .Values.datasets.sync.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: datasets-sync
+            app.kubernetes.io/instance: {{ .Release.Name }}
+        spec:
+          {{- include "opencs.datasetsSyncPodSpec" . | nindent 10 }}
+{{- else }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "opencs.fullname" . }}-datasets-sync
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "opencs.labels" . | nindent 4 }}
+    app.kubernetes.io/component: datasets-sync
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: datasets-sync
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      {{- include "opencs.datasetsSyncPodSpec" . | nindent 6 }}
+{{- end }}
+{{- end }}

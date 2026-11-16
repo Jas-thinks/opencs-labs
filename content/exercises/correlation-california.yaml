@@ -1,0 +1,68 @@
+slug: correlation-california
+title: Correlation in California Housing
+topic: Exploratory Data Analysis
+difficulty: Medium
+position: 110
+estimated_minutes: 20
+datasets: [california-housing]
+related_lesson: correlation-and-relationships
+objective: Quantify and interpret linear and rank correlation, and identify the strongest numeric predictor.
+instructions:
+  markdown: |
+    Work with the California housing table.
+
+    Produce:
+
+    * `corr` — the correlation of every numeric column with `median_house_value`, sorted descending.
+    * `strongest_feature` — the name of the strongest numeric feature (excluding the target itself).
+    * `pearson_r` — Pearson correlation between `median_income` and `median_house_value`.
+    * `spearman_r` — Spearman correlation for the same pair.
+    * `confounder_note` — one sentence naming a likely confounder for the income/value relationship.
+starter_notebook:
+  intro_markdown: |
+    # Correlation in California Housing
+
+    **Objective:** measure association correctly and avoid causal overreach.
+  cells:
+    - source: |
+        import pandas as pd
+
+        df = pd.read_csv("/opt/opencs/datasets/california-housing/v1/housing.csv")
+        df.head()
+    - source: |
+        corr = None  # TODO: correlation with median_house_value, sorted
+        strongest_feature = None  # TODO
+        print(corr.head())
+    - source: |
+        pearson_r = None   # TODO
+        spearman_r = None  # TODO
+        confounder_note = ""  # TODO: one sentence
+        print(pearson_r, spearman_r, confounder_note)
+hints:
+  - "`df.select_dtypes(\"number\").corr()[\"median_house_value\"].sort_values(ascending=False)`."
+  - "The target itself has correlation 1.0 — exclude it when choosing the strongest feature."
+  - "`scipy.stats.pearsonr` and `spearmanr` return objects with a `.statistic` attribute."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 60
+  tests:
+    - id: correlation-series
+      description: corr contains the expected income correlation
+      code: |
+        assert corr is not None
+        assert abs(float(corr.loc["median_income"]) - 0.688) < 0.005
+    - id: strongest
+      description: median_income is the strongest non-target feature
+      code: |
+        assert str(strongest_feature) == "median_income", strongest_feature
+    - id: rank-vs-linear
+      description: Pearson and Spearman coefficients are correct
+      code: |
+        assert abs(float(pearson_r) - 0.688) < 0.005
+        assert abs(float(spearman_r) - 0.677) < 0.01
+    - id: interpretation
+      description: a confounder is named
+      code: |
+        note = str(confounder_note).lower()
+        assert len(note) > 20, "write a sentence naming a likely confounder"
+        assert any(word in note for word in ["location", "geography", "coast", "region"]), note

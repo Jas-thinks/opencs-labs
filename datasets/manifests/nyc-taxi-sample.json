@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "dataset_id": "nyc-taxi-sample",
+  "slug": "nyc-taxi-sample",
+  "title": "NYC Taxi Sample",
+  "category": "Large data",
+  "summary": "20,000 yellow-taxi trips from January 2024 in Parquet format.",
+  "description": "A deterministic 20,000-row sample of New York yellow-taxi trips: pickup and dropoff times, distance, fare, tip and payment type. Delivered as Parquet to teach columnar file formats and aggregation on a larger table.",
+  "teaching_tags": [
+    "parquet",
+    "aggregation",
+    "datetime",
+    "business analytics"
+  ],
+  "position": 90,
+  "license": "NYC Open Data Terms of Use",
+  "license_url": "https://opendata.cityofnewyork.us/overview/#termsofuse",
+  "license_status": "verified",
+  "source_url": "https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page",
+  "attribution": "New York City Taxi & Limousine Commission Trip Record Data.",
+  "notes": "",
+  "generated_at": "2026-11-16T11:11:45.873468+00:00",
+  "generator": "scripts/fetch_datasets.py",
+  "versions": [
+    {
+      "version": 1,
+      "format": "parquet",
+      "file": "trips.parquet",
+      "object_key": "nyc-taxi-sample/v1/trips.parquet",
+      "relative_mount_path": "nyc-taxi-sample/v1/trips.parquet",
+      "sha256": "d9e36b48e7b073ab330db3f54cdb2edf46e8928b57c5348a144a959200210fe0",
+      "size_bytes": 542188,
+      "row_count": 20000,
+      "columns": [
+        {
+          "name": "tpep_pickup_datetime",
+          "dtype": "datetime64[us]"
+        },
+        {
+          "name": "tpep_dropoff_datetime",
+          "dtype": "datetime64[us]"
+        },
+        {
+          "name": "passenger_count",
+          "dtype": "float64"
+        },
+        {
+          "name": "trip_distance",
+          "dtype": "float64"
+        },
+        {
+          "name": "pu_location_id",
+          "dtype": "int32"
+        },
+        {
+          "name": "do_location_id",
+          "dtype": "int32"
+        },
+        {
+          "name": "fare_amount",
+          "dtype": "float64"
+        },
+        {
+          "name": "tip_amount",
+          "dtype": "float64"
+        },
+        {
+          "name": "total_amount",
+          "dtype": "float64"
+        },
+        {
+          "name": "payment_type",
+          "dtype": "int64"
+        }
+      ],
+      "preview": [
+        {
+          "tpep_pickup_datetime": "2024-01-01T00:42:02",
+          "tpep_dropoff_datetime": "2024-01-01T01:07:17",
+          "passenger_count": 1.0,
+          "trip_distance": 1.4,
+          "pu_location_id": 161,
+          "do_location_id": 164,
+          "fare_amount": 17.7,
+          "tip_amount": 0.0,
+          "total_amount": 22.7,
+          "payment_type": 2
+        },
+        {
+          "tpep_pickup_datetime": "2024-01-01T00:57:46",
+          "tpep_dropoff_datetime": "2024-01-01T01:22:55",
+          "passenger_count": 2.0,
+          "trip_distance": 5.4,
+          "pu_location_id": 87,
+          "do_location_id": 161,
+          "fare_amount": 28.9,
+          "tip_amount": 0.0,
+          "total_amount": 33.9,
+          "payment_type": 2
+        },
+        {
+          "tpep_pickup_datetime": "2024-01-01T00:36:30",
+          "tpep_dropoff_datetime": "2024-01-01T00:43:59",
+          "passenger_count": 2.0,
+          "trip_distance": 1.61,
+          "pu_location_id": 79,
+          "do_location_id": 170,
+          "fare_amount": 10.0,
+          "tip_amount": 0.0,
+          "total_amount": 15.0,
+          "payment_type": 2
+        },
+        {
+          "tpep_pickup_datetime": "2024-01-01T00:47:49",
+          "tpep_dropoff_datetime": "2024-01-01T00:56:03",
+          "passenger_count": 1.0,
+          "trip_distance": 1.71,
+          "pu_location_id": 262,
+          "do_location_id": 237,
+          "fare_amount": 10.7,
+          "tip_amount": 3.92,
+          "total_amount": 19.62,
+          "payment_type": 1
+        },
+        {
+          "tpep_pickup_datetime": "2024-01-01T00:17:24",
+          "tpep_dropoff_datetime": "2024-01-01T00:20:14",
+          "passenger_count": 2.0,
+          "trip_distance": 0.3,
+          "pu_location_id": 79,
+          "do_location_id": 114,
+          "fare_amount": 5.1,
+          "tip_amount": 2.0,
+          "total_amount": 12.1,
+          "payment_type": 1
+        }
+      ],
+      "published_at": "2026-11-16T11:11:45.873459+00:00",
+      "transform": {
+        "rows": 20000,
+        "source_rows": 2964624,
+        "sampled": true,
+        "sample_method": "pandas DataFrame.sample(n=20000, random_state=42)",
+        "subset": "selected 10 teaching columns from the January 2024 yellow taxi trip file"
+      }
+    }
+  ]
+}

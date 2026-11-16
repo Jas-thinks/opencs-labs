@@ -1,0 +1,102 @@
+# OpenCS Labs -- grading sandbox namespace.
+#
+# Practice evaluation creates one short-lived batch/v1 Job here per submission.
+# The Job runs the pinned analytics image (never student code in the API), with
+# no service-account token, all capabilities dropped and a read-only root.
+#
+# This namespace is deliberately separate from `opencs` and `opencs-hub` so
+# that a policy mistake cannot expose the platform database or the notebook
+# plane to arbitrary graded code.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opencs-grading
+  labels:
+    app.kubernetes.io/part-of: opencs
+    # Graded code is untrusted: enforce the restricted Pod Security Standard.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+# Default deny both directions. Every allowed flow is spelled out below.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: opencs-grading
+  labels:
+    app.kubernetes.io/part-of: opencs
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# DNS only. No route to PostgreSQL, MinIO, the API, the hub, or the internet.
+#
+# A grading Job must not need the network at all: the notebook and checks
+# arrive through a ConfigMap and datasets through a read-only PVC. If a future
+# exercise claims to need a network resource, that is a design discussion, not
+# a policy change to make quietly.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-only
+  namespace: opencs-grading
+  labels:
+    app.kubernetes.io/part-of: opencs
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: opencs-grader
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# Hard ceiling so a grading storm cannot consume the whole cluster.
+# 20 concurrent Jobs is well above the practice-evaluate rate limit of 6/min
+# per user; Jobs are short-lived and are reaped by ttlSecondsAfterFinished.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: grading-quota
+  namespace: opencs-grading
+spec:
+  hard:
+    pods: "40"
+    count/jobs.batch: "20"
+    requests.cpu: "20"
+    requests.memory: "40Gi"
+    limits.cpu: "40"
+    limits.memory: "80Gi"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: grading-limits
+  namespace: opencs-grading
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "1"
+        memory: 1Gi
+      defaultRequest:
+        cpu: "500m"
+        memory: 512Mi
+      max:
+        cpu: "2"
+        memory: 4Gi

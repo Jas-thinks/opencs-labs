@@ -1,0 +1,191 @@
+{
+  "schema_version": 1,
+  "dataset_id": "titanic",
+  "slug": "titanic",
+  "title": "Titanic",
+  "category": "Data cleaning",
+  "summary": "891 passengers with missing ages, cabins and ports — built for cleaning practice.",
+  "description": "Passenger-level records from the RMS Titanic. Contains genuine missing values (age, cabin, embarked), categorical columns and a binary survival outcome. Used throughout the Data Cleaning and Introduction to ML modules.",
+  "teaching_tags": [
+    "missing values",
+    "cleaning",
+    "classification",
+    "EDA"
+  ],
+  "position": 20,
+  "license": "Not stated by source (seaborn-data mirror)",
+  "license_url": "https://github.com/mwaskom/seaborn-data",
+  "license_status": "review-required",
+  "source_url": "https://raw.githubusercontent.com/mwaskom/seaborn-data/master/titanic.csv",
+  "attribution": "Original compilers: Vanderbilt University Department of Biostatistics; mirrored in seaborn-data.",
+  "notes": "Source repository does not publish an explicit license. Confirm redistribution terms before production use.",
+  "generated_at": "2026-11-16T11:11:37.945382+00:00",
+  "generator": "scripts/fetch_datasets.py",
+  "versions": [
+    {
+      "version": 1,
+      "format": "csv",
+      "file": "titanic.csv",
+      "object_key": "titanic/v1/titanic.csv",
+      "relative_mount_path": "titanic/v1/titanic.csv",
+      "sha256": "81787d320d7f7b03df935e91de8bd19e11d45c5bbcab86ef4d4a76dc91b7d4f2",
+      "size_bytes": 57018,
+      "row_count": 891,
+      "columns": [
+        {
+          "name": "survived",
+          "dtype": "int64"
+        },
+        {
+          "name": "pclass",
+          "dtype": "int64"
+        },
+        {
+          "name": "sex",
+          "dtype": "object"
+        },
+        {
+          "name": "age",
+          "dtype": "float64"
+        },
+        {
+          "name": "sibsp",
+          "dtype": "int64"
+        },
+        {
+          "name": "parch",
+          "dtype": "int64"
+        },
+        {
+          "name": "fare",
+          "dtype": "float64"
+        },
+        {
+          "name": "embarked",
+          "dtype": "object"
+        },
+        {
+          "name": "class",
+          "dtype": "object"
+        },
+        {
+          "name": "who",
+          "dtype": "object"
+        },
+        {
+          "name": "adult_male",
+          "dtype": "bool"
+        },
+        {
+          "name": "deck",
+          "dtype": "object"
+        },
+        {
+          "name": "embark_town",
+          "dtype": "object"
+        },
+        {
+          "name": "alive",
+          "dtype": "object"
+        },
+        {
+          "name": "alone",
+          "dtype": "bool"
+        }
+      ],
+      "preview": [
+        {
+          "survived": 0,
+          "pclass": 3,
+          "sex": "male",
+          "age": 22.0,
+          "sibsp": 1,
+          "parch": 0,
+          "fare": 7.25,
+          "embarked": "S",
+          "class": "Third",
+          "who": "man",
+          "adult_male": true,
+          "deck": null,
+          "embark_town": "Southampton",
+          "alive": "no",
+          "alone": false
+        },
+        {
+          "survived": 1,
+          "pclass": 1,
+          "sex": "female",
+          "age": 38.0,
+          "sibsp": 1,
+          "parch": 0,
+          "fare": 71.2833,
+          "embarked": "C",
+          "class": "First",
+          "who": "woman",
+          "adult_male": false,
+          "deck": "C",
+          "embark_town": "Cherbourg",
+          "alive": "yes",
+          "alone": false
+        },
+        {
+          "survived": 1,
+          "pclass": 3,
+          "sex": "female",
+          "age": 26.0,
+          "sibsp": 0,
+          "parch": 0,
+          "fare": 7.925,
+          "embarked": "S",
+          "class": "Third",
+          "who": "woman",
+          "adult_male": false,
+          "deck": null,
+          "embark_town": "Southampton",
+          "alive": "yes",
+          "alone": true
+        },
+        {
+          "survived": 1,
+          "pclass": 1,
+          "sex": "female",
+          "age": 35.0,
+          "sibsp": 1,
+          "parch": 0,
+          "fare": 53.1,
+          "embarked": "S",
+          "class": "First",
+          "who": "woman",
+          "adult_male": false,
+          "deck": "C",
+          "embark_town": "Southampton",
+          "alive": "yes",
+          "alone": false
+        },
+        {
+          "survived": 0,
+          "pclass": 3,
+          "sex": "male",
+          "age": 35.0,
+          "sibsp": 0,
+          "parch": 0,
+          "fare": 8.05,
+          "embarked": "S",
+          "class": "Third",
+          "who": "man",
+          "adult_male": true,
+          "deck": null,
+          "embark_town": "Southampton",
+          "alive": "no",
+          "alone": true
+        }
+      ],
+      "published_at": "2026-11-16T11:11:37.945369+00:00",
+      "transform": {
+        "rows": 891,
+        "source_rows": 891,
+        "sampled": false
+      }
+    }
+  ]
+}

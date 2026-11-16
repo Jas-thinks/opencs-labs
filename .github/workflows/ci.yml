@@ -1,0 +1,200 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+      - name: Verify every imported dependency is declared
+        run: |
+          # Catches packages that happen to be present transitively in a
+          # developer venv but are not pinned, which would break the container.
+          .venv/bin/python - <<'PY'
+          import ast, pathlib, sys
+
+          declared = set()
+          for line in pathlib.Path("requirements.txt").read_text().splitlines():
+              line = line.strip()
+              if not line or line.startswith("#"):
+                  continue
+              name = line.split("==")[0].split("[")[0].strip().lower()
+              declared.add(name.replace("-", "_"))
+
+          stdlib = set(sys.stdlib_module_names)
+          local = {"app", "tests", "migrations"}
+          missing = set()
+
+          for path in pathlib.Path("app").rglob("*.py"):
+              tree = ast.parse(path.read_text(), filename=str(path))
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Import):
+                      modules = [alias.name.split(".")[0] for alias in node.names]
+                  elif isinstance(node, ast.ImportFrom):
+                      modules = [node.module.split(".")[0]] if node.module else []
+                  else:
+                      continue
+                  for module in modules:
+                      key = module.lower().replace("-", "_")
+                      if key in stdlib or key in local or key in declared:
+                          continue
+                      # Distribution name differs from import name for a few.
+                      aliases = {
+                          "jwt": "pyjwt",
+                          "pydantic_settings": "pydantic_settings",
+                          "psycopg": "psycopg",
+                          "prometheus_client": "prometheus_client",
+                          "yaml": "pyyaml",
+                          "nbformat": "nbformat",
+                      }
+                      if aliases.get(key) in declared:
+                          continue
+                      missing.add(module)
+
+          if missing:
+              print("undeclared imports:", ", ".join(sorted(missing)), file=sys.stderr)
+              sys.exit(1)
+          print("all imports are declared")
+          PY
+      - name: Tests
+        run: .venv/bin/pytest -q
+
+  content:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install validators
+        run: pip install PyYAML pandas pyarrow openpyxl
+      - name: Validate curriculum and exercises
+        run: python scripts/validate_content.py
+      - name: Verify dataset manifests against serving files
+        run: python scripts/sync_datasets.py --skip-upload
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install
+        run: npm install --include=dev
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Test
+        run: npm run test -- --run
+      - name: Build
+        run: npm run build
+
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate raw Kubernetes manifests, compose and JSON
+        run: |
+          pip install PyYAML
+          python - <<'PY'
+          import glob, json, os, sys, yaml
+
+          errors = 0
+          # Helm templates contain Go directives and are only valid once
+          # rendered, so they are excluded here and checked with `helm template`.
+          plain = [
+              p for p in glob.glob("infrastructure/kubernetes/**/*.yaml", recursive=True)
+          ] + [
+              p for p in glob.glob("infrastructure/monitoring/**/*.yaml", recursive=True)
+          ] + [
+              p for p in glob.glob("infrastructure/policies/**/*.yaml", recursive=True)
+          ] + [
+              p for p in glob.glob("infrastructure/storage/**/*.yaml", recursive=True)
+          ] + ["docker-compose.yml"]
+
+          for path in plain:
+              try:
+                  list(yaml.safe_load_all(open(path)))
+              except Exception as exc:
+                  errors += 1
+                  print(f"YAML ERROR {path}: {exc}", file=sys.stderr)
+
+          for path in (
+              glob.glob("infrastructure/**/*.json", recursive=True)
+              + glob.glob("content/**/*.json", recursive=True)
+          ):
+              try:
+                  json.load(open(path))
+              except Exception as exc:
+                  errors += 1
+                  print(f"JSON ERROR {path}: {exc}", file=sys.stderr)
+
+          print(f"validated {len(plain)} manifests")
+          sys.exit(1 if errors else 0)
+          PY
+      - name: Render the Helm chart
+        uses: azure/setup-helm@v4
+      - name: Helm lint
+        run: helm lint infrastructure/helm/opencs
+      - name: Helm template
+        run: helm template opencs infrastructure/helm/opencs --namespace opencs > /dev/null
+
+  notebook-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate grade runner compiles
+        run: python3 -m py_compile notebook-image/grade_runner.py
+      - name: Validate JupyterHub config compiles
+        run: |
+          python3 -m py_compile jupyterhub/jupyterhub_config.py
+          python3 -m py_compile jupyterhub/opencs_auth.py
+
+  jupyterlab-extension:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: jupyterlab-extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install
+        run: npm install --include=dev --no-audit --no-fund
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Build
+        run: npx tsc
+      - name: Enforce the no-execution contract
+        run: |
+          # ADR-005: inserting a dataset cell must never execute it. A
+          # `requestExecute` call in the compiled output would break that.
+          if grep -rn "requestExecute" lib/ src/ --include="*.js" --include="*.ts" \
+               | grep -v "^\S*:[0-9]*: \*" | grep -v "^\S*:[0-9]*://"; then
+            echo "ERROR: requestExecute found in the extension source" >&2
+            exit 1
+          fi
+          echo "contract holds: no kernel execution in the extension"

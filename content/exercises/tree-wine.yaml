@@ -1,0 +1,73 @@
+slug: tree-wine
+title: Control Decision Tree Depth
+topic: Trees and Random Forest
+difficulty: Medium
+position: 180
+estimated_minutes: 22
+datasets: [wine-quality]
+related_lesson: decision-trees
+objective: Measure the train/test gap across tree depths and choose a depth that generalises.
+instructions:
+  markdown: |
+    Classify wine as `good` (`quality >= 6`) using a decision tree.
+
+    Produce:
+
+    * `results` — a dict mapping depth (`2`, `3`, `5`, `None`) to a dict with `train` and `test` accuracy on a 75/25 stratified split with `random_state=42`.
+    * `chosen_depth` — one of those depths, justified by held-out accuracy.
+    * `importances` — a pandas Series of feature importances from a depth-3 tree, sorted descending.
+starter_notebook:
+  intro_markdown: |
+    # Control Decision Tree Depth
+
+    **Objective:** see overfitting directly and choose complexity from evidence.
+  cells:
+    - source: |
+        import pandas as pd
+        from sklearn.model_selection import train_test_split
+        from sklearn.tree import DecisionTreeClassifier
+
+        df = pd.read_csv("/opt/opencs/datasets/wine-quality/v1/winequality-red.csv")
+        df["good"] = (df["quality"] >= 6).astype(int)
+        X = df.drop(columns=["quality", "good"])
+        y = df["good"]
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.25, random_state=42, stratify=y
+        )
+    - source: |
+        results = {}  # TODO: fill for depths 2, 3, 5, None
+        for depth in [2, 3, 5, None]:
+            pass
+        print(results)
+    - source: |
+        chosen_depth = None  # TODO
+        tree = DecisionTreeClassifier(max_depth=3, random_state=42).fit(X_train, y_train)
+        importances = None  # TODO: Series of feature_importances_, sorted descending
+        print(importances.head() if importances is not None else None)
+hints:
+  - "Fit a fresh `DecisionTreeClassifier(max_depth=depth, random_state=42)` per depth."
+  - "`tree.score(X_train, y_train)` and `tree.score(X_test, y_test)`."
+  - "Feature importances align with `X.columns`."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 90
+  tests:
+    - id: depth-sweep
+      description: results contains the four depths with correct test accuracies
+      code: |
+        assert set(results.keys()) == {2, 3, 5, None}, results.keys()
+        assert abs(float(results[3]["test"]) - 0.733) < 0.02, results[3]
+        assert abs(float(results[3]["train"]) - 0.740) < 0.02, results[3]
+        assert float(results[None]["train"]) == 1.0, results[None]
+    - id: chosen-depth
+      description: chosen_depth is one of the evaluated depths
+      code: |
+        assert chosen_depth in {2, 3, 5, None}, chosen_depth
+        assert float(results[chosen_depth]["test"]) >= 0.72, results[chosen_depth]
+    - id: importances
+      description: importances is a Series whose top feature is alcohol
+      code: |
+        import pandas as pd
+        assert isinstance(importances, pd.Series), type(importances)
+        assert importances.index[0] == "alcohol", importances.head()
+        assert abs(float(importances.sum()) - 1.0) < 1e-6

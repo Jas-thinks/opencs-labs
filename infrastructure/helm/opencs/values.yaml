@@ -1,0 +1,659 @@
+# OpenCS Labs -- Helm values.
+#
+# These are production defaults and mirror infrastructure/kubernetes/*.yaml.
+# Anything you change here must also be reflected in the raw reference
+# manifests, otherwise the two deployment paths drift.
+#
+#   helm upgrade --install opencs infrastructure/helm/opencs \
+#     --namespace opencs --create-namespace \
+#     --values infrastructure/helm/opencs/values.yaml \
+#     --set global.origin=https://opencs.example.edu
+
+# ---------------------------------------------------------------------------
+# Naming
+# ---------------------------------------------------------------------------
+# Override the chart name used in resource names. Leave empty to derive names
+# from the release name (release `opencs` -> `opencs-backend`, `opencs-config`).
+nameOverride: ""
+fullnameOverride: ""
+
+# ---------------------------------------------------------------------------
+# Global
+# ---------------------------------------------------------------------------
+global:
+  # Single browser origin fronting the React app, the API and JupyterHub.
+  origin: "https://opencs.example.edu"
+  # Default image tag for all opencs/* images. Override per component.
+  imageTag: "1.0.0"
+  # Image pull secrets (private registry). Empty list = none.
+  imagePullSecrets: []
+  #  # Example:
+  #  # - name: registry-credentials
+  imagePullPolicy: IfNotPresent
+  # Namespace for the notebook plane. Single-user pods are created there by
+  # KubeSpawner. The chart uses it only to document the proxy Service that the
+  # Ingress alias points at (`ingress.hubProxyAlias.externalName`); the
+  # namespace itself is created by infrastructure/kubernetes/namespace.yaml.
+  hubNamespace: "opencs-hub"
+  # Labels added to every resource the chart renders.
+  commonLabels: {}
+  # Pod Security Admission level for the application namespace. Recorded here so
+  # both deployment paths agree; the chart does NOT create the Namespace, so the
+  # label is applied by `kubectl apply -f infrastructure/kubernetes/namespace.yaml`
+  # (or `kubectl label ns opencs pod-security.kubernetes.io/enforce=<level>`).
+  podSecurityEnforce: "restricted"
+
+# The chart deliberately does NOT create namespaces or the notebook plane.
+# Namespaces, PostgreSQL, MinIO, JupyterHub and the dataset PVC are applied from
+# the raw manifests / their own charts -- see infrastructure/README.md and
+# templates/NOTES.txt. These flags therefore only describe intent; they are not
+# consumed by any template. Remove or wire them up if that ever changes.
+namespace:
+  # Informational: create the `opencs` and `opencs-hub` namespaces separately.
+  create: true
+
+# ---------------------------------------------------------------------------
+# Backend -- FastAPI (opencs/backend:1.0.0, port 8000)
+# ---------------------------------------------------------------------------
+backend:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: opencs/backend
+    # Defaults to global.imageTag when empty.
+    tag: ""
+    pullPolicy: ""
+
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 8000
+
+  # Non-secret settings, rendered into the `opencs-config` ConfigMap.
+  # Every key maps to an OPENCE_* environment variable read by
+  # backend/app/core/config.py.
+  config:
+    OPENCE_ENV: "production"
+    OPENCE_API_PREFIX: "/api/v1"
+    OPENCE_JUPYTERHUB_URL: "https://opencs.example.edu"
+    OPENCE_JUPYTERHUB_API_URL: "http://hub.opencs-hub.svc.cluster.local:8081/hub/api"
+    OPENCE_JUPYTERHUB_PUBLIC_URL: "https://opencs.example.edu"
+    OPENCE_NOTEBOOK_BACKEND: "hub"
+    OPENCE_DATASET_MOUNT_PATH: "/opt/opencs/datasets"
+    OPENCE_DATASET_SERVING_DIR: "/opt/opencs/datasets"
+    OPENCE_ENVIRONMENT_IMAGE: "opencs/analytics:1.0.0"
+    OPENCE_MAX_ACTIVE_SESSIONS: "450"
+    OPENCE_RATE_LIMIT_ENABLED: "true"
+    # `kubernetes` runs each evaluation as a short-lived batch/v1 Job in the
+    # dedicated grading namespace (see infrastructure/kubernetes/
+    # grading-namespace.yaml): no service-account token, read-only root, all
+    # capabilities dropped, DNS-only egress and a ResourceQuota ceiling.
+    # `docker` is the dev/compose path and needs a daemon the hardened backend
+    # pod does not have, so production startup rejects it.
+    OPENCE_GRADER: "kubernetes"
+    OPENCE_GRADER_K8S_NAMESPACE: "opencs-grading"
+    OPENCE_GRADER_DATASET_PVC: "opencs-datasets"
+    # Production boot requirements (validate_runtime()).
+    OPENCE_COOKIE_SECURE: "true"
+    OPENCE_AUTH_MODE: "oidc"
+    OPENCE_OIDC_ISSUER: "https://idp.example.edu/realms/opencs"
+    OPENCE_S3_ENDPOINT: "http://minio.opencs.svc.cluster.local:9000"
+    OPENCE_S3_BUCKET: "opencs-datasets"
+    OPENCE_S3_REGION: "us-east-1"
+    OPENCE_GRADER_IMAGE: "opencs/analytics:1.0.0"
+    OPENCE_GRADER_TIMEOUT_SECONDS: "90"
+    OPENCE_GRADER_MEMORY: "1g"
+    OPENCE_GRADER_CPUS: "1"
+    OPENCE_RATE_LIMIT_LAUNCH_PER_MINUTE: "10"
+    OPENCE_RATE_LIMIT_EVALUATE_PER_MINUTE: "6"
+    OPENCE_NOTEBOOK_START_TIMEOUT_SECONDS: "120"
+
+  # Reference to the Secret holding credentials. When `existingSecret` is set,
+  # the chart does NOT render a Secret object and simply consumes it.
+  existingSecret: "opencs-secrets"
+  # Used only when existingSecret is empty: keys to put in the generated Secret.
+  # Leave the defaults empty rather than inventing credentials.
+  secret:
+    create: false
+    data:
+      OPENCE_JWT_SECRET: ""
+      OPENCE_JUPYTERHUB_API_TOKEN: ""
+      OPENCE_DATABASE_URL: ""
+      OPENCE_S3_ACCESS_KEY: ""
+      OPENCE_S3_SECRET_KEY: ""
+      OPENCE_OIDC_CLIENT_SECRET: ""
+
+  # Read-only dataset tree, mounted from the shared serving PVC.
+  datasets:
+    mountPath: "/opt/opencs/datasets"
+    readOnly: true
+
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+
+  probes:
+    liveness:
+      path: /health
+      initialDelaySeconds: 20
+      periodSeconds: 15
+      timeoutSeconds: 5
+      failureThreshold: 4
+    readiness:
+      path: /ready
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    startup:
+      path: /health
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 24
+
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+  terminationGracePeriodSeconds: 30
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+    # The backend uses no Kubernetes API access; keep the token unmounted.
+    automountServiceAccountToken: false
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+# ---------------------------------------------------------------------------
+# Frontend -- static React build on nginx (opencs/frontend:1.0.0, port 80)
+# ---------------------------------------------------------------------------
+frontend:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: opencs/frontend
+    tag: ""
+    pullPolicy: ""
+
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 80
+
+  # Baked into the bundle at build time by Vite; recorded here so the deployed
+  # API path is documented next to the ingress it must match.
+  build:
+    viteApiBase: "/api/v1"
+
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+
+  probes:
+    liveness:
+      path: /
+      initialDelaySeconds: 10
+      periodSeconds: 20
+      timeoutSeconds: 3
+      failureThreshold: 3
+    readiness:
+      path: /
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+# ---------------------------------------------------------------------------
+# JupyterHub (Zero to JupyterHub chart values, passed through verbatim)
+#
+# The hub itself is installed separately (see NOTES.txt) so that chart upgrades
+# are an explicit, tested operation. This block holds the values this platform
+# standardises on: KubeSpawner profile, notebook image, per-user resource
+# envelope, storage and idle culling.
+# ---------------------------------------------------------------------------
+jupyterhub:
+  enabled: true
+  # Chart reference used by the install command in NOTES.txt.
+  chart:
+    name: jupyterhub
+    repo: https://hub.jupyter.org/helm-chart/
+    version: "3.3.7"
+    releaseName: jupyterhub
+    namespace: opencs-hub
+
+  hub:
+    image:
+      name: opencs/jupyterhub
+      tag: "1.0.0"
+    service:
+      # Internal API port the OpenCS backend calls.
+      port: 8081
+    baseUrl: /
+    config:
+      # JupyterHub trusts only the single public origin.
+      JupyterHub:
+        authenticator_class: opencs
+      # Kernel/terminal culling warnings.
+    extraConfig:
+      opencs-origin: |
+        c.JupyterHub.base_url = "/"
+        c.JupyterHub.cookie_options = {"samesite": "Lax", "secure": True}
+        c.JupyterHub.tornado_settings = {
+            "headers": {"Content-Security-Policy": "frame-ancestors 'self'"},
+        }
+    # Admin users (institutional staff). Empty means provision via the backend.
+    adminUsers: []
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "512Mi"
+      limits:
+        cpu: "1"
+        memory: "1Gi"
+
+  proxy:
+    # ClusterIP: the OpenCS Ingress is the single browser entry point.
+    # Switch to LoadBalancer only if you deliberately expose a second origin.
+    service:
+      type: ClusterIP
+      port: 80
+    chp:
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+        limits:
+          cpu: "1"
+          memory: "512Mi"
+
+  # --- KubeSpawner: one single-user pod per active student -----------------
+  kubeSpawner:
+    image:
+      name: opencs/analytics
+      tag: "1.0.0"
+      pullPolicy: IfNotPresent
+    # uid/gid 1000 for every notebook pod; matches the notebook image and the
+    # Kyverno guardrail in infrastructure/policies/.
+    uid: 1000
+    gid: 1000
+    fsGroup: 1000
+    # Per-pod resource envelope (HLD section 12.2 base compute profile).
+    cpu:
+      request: "500m"
+      limit: "1"
+    memory:
+      request: "1Gi"
+      limit: "2Gi"
+    # Ephemeral scratch space inside the pod (not the home directory).
+    ephemeralStorage:
+      request: "2Gi"
+      limit: "10Gi"
+    # --- Persistent per-student home ---------------------------------------
+    storage:
+      enabled: true
+      # 5Gi is the per-student home quota; 600 enrolled students => 3TiB
+      # total. Enforce a namespace/StorageClass quota so a runaway notebook
+      # cannot fill the cluster.
+      capacity: "5Gi"
+      # ReadWriteOnce per-user PVC provisioned by KubeSpawner.
+      accessModes:
+        - ReadWriteOnce
+      # Empty = use the cluster default StorageClass (RWO, CSI-backed).
+      # See infrastructure/storage/storageclass-rwx.yaml for the RWX class that
+      # backs the shared dataset tree instead.
+      storageClass: ""
+      mountPath: "/home/jovyan"
+      # Pre-create the home from the image. A missing PVC must never silently
+      # become an empty home (HLD 17.1).
+      dynamic:
+        storageClass: ""
+        pvcNameTemplate: claim-{username}
+    # --- Idle culling ------------------------------------------------------
+    idleCuller:
+      enabled: true
+      # 30 minutes: long enough for a student to read a lesson without being
+      # disconnected, short enough to free a scheduler slot for someone else.
+      timeoutSeconds: 1800
+      cullEverySeconds: 300
+      # Give the student a warning in the JupyterLab UI before the cull.
+      maxAgeSeconds: 0
+    # --- Read-only shared dataset tree ------------------------------------
+    datasets:
+      # PVC created by infrastructure/kubernetes/datasets-pvc.yaml.
+      servingPvc: "opencs-datasets"
+      mountPath: "/opt/opencs/datasets"
+      readOnly: true
+    # The notebook pod never needs a Kubernetes API token.
+    automountServiceAccountToken: false
+    # Pod security for untrusted student code.
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      allowPrivilegeEscalation: false
+      privileged: false
+      readOnlyRootFilesystem: false
+      capabilities:
+        drop:
+          - ALL
+      seccompProfile:
+        type: RuntimeDefault
+    # Admission control: 400 target peak + 50 launch headroom.
+    maxActiveSessions: 450
+    # Notebook pods require taint-tolerant nodes in the compute plane.
+    nodeSelector: {}
+    tolerations: []
+    extraEnv: []
+    # Mount the dataset PVC through KubeSpawner's volume list.
+    extraVolumes:
+      - name: opencs-datasets
+        persistentVolumeClaim:
+          claimName: opencs-datasets
+          readOnly: true
+    extraVolumeMounts:
+      - name: opencs-datasets
+        mountPath: /opt/opencs/datasets
+        readOnly: true
+
+  scheduling:
+    # Spread 450 single-user pods across nodes rather than packing one.
+    userScheduler:
+      enabled: true
+    userPods:
+      nodeAffinity:
+        matchNodePurpose: "require"
+    corePods:
+      nodeAffinity:
+        matchNodePurpose: "prefer"
+
+  # --- Theming: point the hub UI back at the OpenCS origin -----------------
+  custom:
+    opencs:
+      origin: "https://opencs.example.edu"
+
+# ---------------------------------------------------------------------------
+# PostgreSQL -- platform metadata (users, courses, catalogue, attempts)
+# ---------------------------------------------------------------------------
+postgres:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "16-alpine"
+  # 1 replica: a second postgres process on the same RWO volume is not a
+  # cluster. Use an operator (CloudNativePG) if you need HA.
+  replicaCount: 1
+  service:
+    port: 5432
+  auth:
+    database: "opencs"
+    username: "opencs"
+    # Never put a real password in values.yaml.
+    existingSecret: "opencs-secrets"
+    passwordKey: "POSTGRES_PASSWORD"
+  persistence:
+    enabled: true
+    size: "50Gi"
+    # Empty = cluster default StorageClass.
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "2"
+      memory: "2Gi"
+  # PGDATA must be a subdirectory of the mount to keep initdb happy.
+  pgData: "/var/lib/postgresql/data/pgdata"
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 999
+    runAsGroup: 999
+    fsGroup: 999
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+
+# ---------------------------------------------------------------------------
+# MinIO -- canonical dataset / asset object store (bucket opencs-datasets)
+# ---------------------------------------------------------------------------
+minio:
+  enabled: true
+  image:
+    repository: minio/minio
+    tag: "RELEASE.2024-06-13T22-53-53Z"
+  clientImage:
+    repository: minio/mc
+    tag: "RELEASE.2024-06-12T14-34-03Z"
+  service:
+    apiPort: 9000
+    consolePort: 9001
+  auth:
+    existingSecret: "opencs-secrets"
+    rootUserKey: "MINIO_ROOT_USER"
+    rootPasswordKey: "MINIO_ROOT_PASSWORD"
+  bucket:
+    name: "opencs-datasets"
+    # An init Job creates the bucket and sets it to private. Idempotent.
+    create: true
+  persistence:
+    enabled: true
+    size: "200Gi"
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "2"
+      memory: "2Gi"
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# Dataset serving tree
+# ---------------------------------------------------------------------------
+datasets:
+  # ReadWriteMany PVC holding the read-only serving tree that notebook pods
+  # mount at /opt/opencs/datasets. Must be backed by an RWX StorageClass; see
+  # infrastructure/storage/storageclass-rwx.yaml.
+  servingPvc:
+    # Render the PVC. Set false when it is provisioned outside the chart.
+    create: true
+    name: "opencs-datasets"
+    size: "50Gi"
+    storageClass: "opencs-rwx"
+    accessModes:
+      - ReadWriteMany
+    # Path every consumer (backend, notebook pods, graders) mounts it at.
+    mountPath: "/opt/opencs/datasets"
+  # Dataset publication / materialisation Job (templates/datasets.yaml).
+  # Verifies each serving file against its manifest sha256, then uploads
+  # changed objects to MinIO and materialises the tree on the PVC.
+  sync:
+    enabled: true
+    image:
+      repository: opencs/backend
+      tag: ""
+    # all | upload | materialise
+    mode: "all"
+    # "" = one-shot post-install/post-upgrade hook Job.
+    # A cron string renders a CronJob instead.
+    schedule: ""
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "512Mi"
+      limits:
+        cpu: "2"
+        memory: "2Gi"
+
+# ---------------------------------------------------------------------------
+# Grading sandbox (templates/grading.yaml)
+#
+# Practice evaluation runs one short-lived batch/v1 Job per submission in a
+# dedicated namespace. That namespace has no route to PostgreSQL, MinIO, the
+# API or the internet: a graded notebook needs the ConfigMap and the read-only
+# dataset PVC, nothing else.
+# ---------------------------------------------------------------------------
+grading:
+  enabled: true
+  namespace: "opencs-grading"
+  quota:
+    pods: "40"
+    jobs: "20"
+    requestsCpu: "20"
+    requestsMemory: "40Gi"
+    limitsCpu: "40"
+    limitsMemory: "80Gi"
+  defaults:
+    cpu: "1"
+    memory: "1Gi"
+    requestCpu: "500m"
+    requestMemory: "512Mi"
+    maxCpu: "2"
+    maxMemory: "4Gi"
+
+# ---------------------------------------------------------------------------
+# Ingress -- one host, one origin
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: "nginx"
+  # NOTE: `proxy-http-version` and `configuration-snippet` are set by
+  # templates/ingress.yaml, not here, so the WebSocket posture cannot be
+  # accidentally dropped by overriding this map.
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-production"
+  host: "opencs.example.edu"
+  tls:
+    enabled: true
+    secretName: "opencs-tls"
+  # Paths rendered by templates/ingress.yaml. Order matters only for readability;
+  # the controller always prefers the longest matching prefix.
+  paths:
+    frontend:
+      path: "/"
+    api:
+      path: "/api"
+    hub:
+      paths:
+        - "/hub"
+        - "/user"
+  # Service that fronts the JupyterHub proxy. Because the Hub lives in
+  # opencs-hub and an Ingress cannot cross namespaces, the chart renders an
+  # ExternalName alias with this name in the release namespace.
+  hubProxyAlias:
+    enabled: true
+    name: "jupyterhub-proxy-public"
+    externalName: "proxy-public.opencs-hub.svc.cluster.local"
+    port: 80
+
+# ---------------------------------------------------------------------------
+# Monitoring
+# ---------------------------------------------------------------------------
+monitoring:
+  # The chart renders no monitoring objects itself: PrometheusRule,
+  # ServiceMonitor and the Grafana dashboard are applied from
+  # infrastructure/monitoring/. These values are consumed by the backend's
+  # pod scrape annotations (path/interval) and by templates/NOTES.txt, which
+  # prints the matching kubectl commands. Keeping the CRs out of the app release
+  # means `helm rollback` can never remove an alert rule.
+  serviceMonitor:
+    # When false, note that scraping then relies only on the prometheus.io/*
+    # pod annotations the Deployment sets.
+    enabled: true
+    # Must match the Prometheus Operator's selector for your stack.
+    labels:
+      release: kube-prometheus-stack
+    interval: "30s"
+    scrapeTimeout: "10s"
+    path: "/metrics"
+    # JupyterHub exposes Prometheus metrics when configured; scrape the hub too.
+    jupyterhub:
+      enabled: true
+      namespace: "opencs-hub"
+      serviceName: "hub"
+      port: "hub"
+      path: "/hub/metrics"
+      interval: "30s"
+  prometheusRule:
+    # Applied from infrastructure/monitoring/prometheus-rules.yaml.
+    enabled: true
+    labels:
+      release: kube-prometheus-stack
+  grafanaDashboard:
+    # Applied from infrastructure/monitoring/grafana-dashboard.json.
+    enabled: true
+    # Sidecar discovery label for kube-prometheus-stack dashboards.
+    labels:
+      grafana_dashboard: "1"
+    namespace: "monitoring"

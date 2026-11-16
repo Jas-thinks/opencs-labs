@@ -1,0 +1,14 @@
+{
+  "title": "OpenCS Datasets",
+  "description": "Settings for the OpenCS dataset catalogue extension.",
+  "type": "object",
+  "properties": {
+    "apiBase": {
+      "type": "string",
+      "title": "API base path",
+      "description": "Base path of the OpenCS API. Requests are made with credentials included, so the student's existing session cookie authorises them.",
+      "default": "/api/v1"
+    }
+  },
+  "additionalProperties": false
+}

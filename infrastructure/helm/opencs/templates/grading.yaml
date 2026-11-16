@@ -1,0 +1,133 @@
+{{/*
+Grading sandbox namespace, RBAC, quota and network policy.
+
+Each practice evaluation is one short-lived batch/v1 Job here. Rendering this
+from the chart means the raw reference manifest
+(infrastructure/kubernetes/grading-namespace.yaml + grading-rbac.yaml) and the
+Helm path cannot drift.
+
+Enabled by `grading.enabled`. When the backend runs with a non-Kubernetes
+grader this whole file is skipped.
+*/}}
+{{- if .Values.grading.enabled }}
+{{- $ns := .Values.grading.namespace }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  labels:
+    app.kubernetes.io/part-of: opencs
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/part-of: opencs
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-only
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/part-of: opencs
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: opencs-grader
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: grading-quota
+  namespace: {{ $ns }}
+spec:
+  hard:
+    pods: {{ .Values.grading.quota.pods | quote }}
+    count/jobs.batch: {{ .Values.grading.quota.jobs | quote }}
+    requests.cpu: {{ .Values.grading.quota.requestsCpu | quote }}
+    requests.memory: {{ .Values.grading.quota.requestsMemory | quote }}
+    limits.cpu: {{ .Values.grading.quota.limitsCpu | quote }}
+    limits.memory: {{ .Values.grading.quota.limitsMemory | quote }}
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: grading-limits
+  namespace: {{ $ns }}
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: {{ .Values.grading.defaults.cpu | quote }}
+        memory: {{ .Values.grading.defaults.memory | quote }}
+      defaultRequest:
+        cpu: {{ .Values.grading.defaults.requestCpu | quote }}
+        memory: {{ .Values.grading.defaults.requestMemory | quote }}
+      max:
+        cpu: {{ .Values.grading.defaults.maxCpu | quote }}
+        memory: {{ .Values.grading.defaults.maxMemory | quote }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "opencs.fullname" . }}-grader
+  namespace: {{ $ns }}
+  labels:
+    {{- include "opencs.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "opencs.fullname" . }}-grader
+  namespace: {{ $ns }}
+  labels:
+    {{- include "opencs.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "opencs.fullname" . }}-grader
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "opencs.backendServiceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

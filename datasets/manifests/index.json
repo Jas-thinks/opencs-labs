@@ -1,0 +1,92 @@
+[
+  {
+    "slug": "california-housing",
+    "title": "California Housing",
+    "category": "Regression",
+    "license_status": "review-required",
+    "version": 1,
+    "sha256": "8a3727f4cf54ac1a327f69b1d5b4db54c5834ea81c6e4efc0d163300022a685e",
+    "row_count": 20640
+  },
+  {
+    "slug": "diabetes",
+    "title": "Diabetes Progression",
+    "category": "Regression",
+    "license_status": "review-required",
+    "version": 1,
+    "sha256": "37445ec452084294acd1ff6f306cc0dc44e533fb158d790fcdc546be880b6e06",
+    "row_count": 442
+  },
+  {
+    "slug": "gapminder",
+    "title": "Gapminder",
+    "category": "Time series",
+    "license_status": "verified",
+    "version": 1,
+    "sha256": "81d88c9bba35b5dda347b1aed29023d48363b9d50b4691dd7b40e938c51dba43",
+    "row_count": 1704
+  },
+  {
+    "slug": "iris",
+    "title": "Iris",
+    "category": "Classic classification",
+    "license_status": "verified",
+    "version": 1,
+    "sha256": "c52742e50315a99f956a383faedf7575552675f6409ef0f9a47076dd08479930",
+    "row_count": 150
+  },
+  {
+    "slug": "nyc-taxi-sample",
+    "title": "NYC Taxi Sample",
+    "category": "Large data",
+    "license_status": "verified",
+    "version": 1,
+    "sha256": "d9e36b48e7b073ab330db3f54cdb2edf46e8928b57c5348a144a959200210fe0",
+    "row_count": 20000
+  },
+  {
+    "slug": "palmer-penguins",
+    "title": "Palmer Penguins",
+    "category": "Visualization",
+    "license_status": "verified",
+    "version": 1,
+    "sha256": "f2d6493fc64ad958edbabd55eb0fc989af2c5a0458a2c79ccffe7985606feb60",
+    "row_count": 344
+  },
+  {
+    "slug": "retail-sales",
+    "title": "Online Retail Sales",
+    "category": "Business analytics",
+    "license_status": "verified",
+    "version": 1,
+    "sha256": "3e389d3f14b4f5b9fddd23ed51a7fd898c8fc83318fdc2723ffb532a60bb34ba",
+    "row_count": 20000
+  },
+  {
+    "slug": "tips",
+    "title": "Restaurant Tips",
+    "category": "GroupBy",
+    "license_status": "review-required",
+    "version": 1,
+    "sha256": "22415aaf1e56e675b9a0983cb0d321697dad51f6060a44fb8ecaad7a00de9a09",
+    "row_count": 244
+  },
+  {
+    "slug": "titanic",
+    "title": "Titanic",
+    "category": "Data cleaning",
+    "license_status": "review-required",
+    "version": 1,
+    "sha256": "81787d320d7f7b03df935e91de8bd19e11d45c5bbcab86ef4d4a76dc91b7d4f2",
+    "row_count": 891
+  },
+  {
+    "slug": "wine-quality",
+    "title": "Wine Quality (Red)",
+    "category": "Statistics",
+    "license_status": "verified",
+    "version": 1,
+    "sha256": "78da77462691343ab478952bc4ee2978fe8a0644cc0f685853ed65f3e834b4af",
+    "row_count": 1599
+  }
+]

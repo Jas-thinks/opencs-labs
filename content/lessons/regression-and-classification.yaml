@@ -1,0 +1,440 @@
+slug: regression-and-classification
+title: Regression and Classification
+description: The two core supervised tasks — predicting a number and predicting a class.
+
+lessons:
+  - slug: linear-regression
+    title: Linear Regression
+    objective: Fit and interpret a linear regression, and judge it with R², MAE and residuals.
+    summary: Predict California house values from median income, then add features and measure the improvement honestly.
+    estimated_minutes: 18
+    datasets: [california-housing]
+    exercises: [regression-california]
+    notebook_activity:
+      title: Predicting house values
+      intro_markdown: |
+        # Linear Regression
+
+        A regression model predicts a number. Start with one feature, understand
+        the coefficient, then decide whether more features actually help.
+      cells:
+        - source: |
+            import pandas as pd
+            from sklearn.model_selection import train_test_split
+            from sklearn.linear_model import LinearRegression
+            from sklearn.metrics import r2_score, mean_absolute_error
+
+            df = pd.read_csv("/opt/opencs/datasets/california-housing/v1/housing.csv")
+            X = df[["median_income"]]
+            y = df["median_house_value"]
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        - source: |
+            model = LinearRegression().fit(X_train, y_train)
+            pred = model.predict(X_test)
+            print("coefficient:", round(model.coef_[0], 0))
+            print("intercept:  ", round(model.intercept_, 0))
+            print("R2:", round(r2_score(y_test, pred), 3))
+            print("MAE:", round(mean_absolute_error(y_test, pred), 0))
+        - cell_type: markdown
+          source: |
+            ## Add features
+
+            Does a four-feature model beat the one-feature model on held-out data?
+        - source: |
+            multi = df[["median_income", "housing_median_age", "total_rooms", "households"]]
+            Xtr, Xte, ytr, yte = train_test_split(multi, y, test_size=0.2, random_state=42)
+            model2 = LinearRegression().fit(Xtr, ytr)
+            print("multi-feature R2:", round(r2_score(yte, model2.predict(Xte)), 3))
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                California districts with higher median income have more expensive
+                houses. A straight line is the simplest model of that relationship:
+                `value ≈ intercept + coefficient × income`.
+            - type: chart
+              title: Income versus house value
+              caption: Positive, roughly linear, with a hard cap at 500,001 and wide spread.
+              spec:
+                type: scatter
+                x: median_income
+                y: median_house_value
+                data:
+                  - {median_income: 8.3252, median_house_value: 452600}
+                  - {median_income: 7.2574, median_house_value: 352100}
+                  - {median_income: 5.6431, median_house_value: 341300}
+                  - {median_income: 3.8462, median_house_value: 342200}
+                  - {median_income: 4.0368, median_house_value: 269700}
+                  - {median_income: 3.12, median_house_value: 241400}
+                  - {median_income: 2.0804, median_house_value: 226700}
+                  - {median_income: 1.7, median_house_value: 162500}
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: markdown
+              text: |
+                Linear regression chooses the line that minimises the sum of squared
+                residuals — the vertical distances between observed and predicted
+                values.
+
+                * **Coefficient** — the predicted change in the target for a one-unit
+                  increase in the feature, holding other features fixed.
+                * **Intercept** — the prediction when all features are zero. Often not
+                  meaningful; for income, a district with zero income is outside the data.
+                * **R²** — the fraction of variance in the target explained by the model
+                  on the evaluation data. 0 is no better than predicting the mean; 1 is
+                  perfect.
+                * **MAE** — the average absolute error, in the target's units.
+            - type: callout
+              variant: warning
+              title: R² alone is not enough
+              text: |
+                A model can have a respectable R² and errors that are useless in
+                practice. Report the error in dollars, and inspect where the model is
+                wrong.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              source: |
+                import pandas as pd
+
+                df = pd.read_csv("/opt/opencs/datasets/california-housing/v1/housing.csv")
+                print(df[["median_income", "median_house_value"]].describe().round(2))
+                print("capped values:", int((df.median_house_value >= 500001).sum()))
+            - type: output
+              kind: text
+              text: |
+                median_income  median_house_value
+                count       20640.00            20640.00
+                mean            3.87           206855.82
+                std             1.90           115395.62
+                min             0.50            14999.00
+                25%             2.56           119600.00
+                50%             3.53           179700.00
+                75%             4.74           264725.00
+                max            15.00           500001.00
+                capped values: 965
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              caption: One feature, held-out evaluation.
+              source: |
+                from sklearn.model_selection import train_test_split
+                from sklearn.linear_model import LinearRegression
+                from sklearn.metrics import r2_score, mean_absolute_error
+
+                X = df[["median_income"]]
+                y = df["median_house_value"]
+                X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+                model = LinearRegression().fit(X_train, y_train)
+                pred = model.predict(X_test)
+                print("coef:", round(model.coef_[0], 0))
+                print("intercept:", round(model.intercept_, 0))
+                print("R2:", round(r2_score(y_test, pred), 3))
+                print("MAE:", round(mean_absolute_error(y_test, pred), 0))
+            - type: output
+              kind: text
+              text: |
+                coef: 41934.0
+                intercept: 44460.0
+                R2: 0.459
+                MAE: 62991.0
+            - type: markdown
+              text: |
+                Interpretation: each additional unit of median income is associated
+                with about \$41,934 more in predicted median house value. The model
+                explains 45.9% of the variance in the held-out set, and its average
+                absolute error is about \$62,991 — large relative to typical values.
+            - type: code
+              language: python
+              caption: More features help, but only modestly.
+              source: |
+                multi = df[["median_income", "housing_median_age", "total_rooms", "households"]]
+                Xtr, Xte, ytr, yte = train_test_split(multi, y, test_size=0.2, random_state=42)
+                model2 = LinearRegression().fit(Xtr, ytr)
+                print("R2:", round(r2_score(yte, model2.predict(Xte)), 3))
+                print("MAE:", round(mean_absolute_error(yte, model2.predict(Xte)), 0))
+            - type: output
+              kind: text
+              text: |
+                R2: 0.524
+                MAE: 58436.0
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: markdown
+              text: |
+                Compare models on held-out data, never on training data. The
+                multi-feature model improves R² from 0.459 to 0.524 and reduces MAE by
+                about \$4,555. That is a real but limited improvement.
+            - type: table
+              caption: Held-out performance of two linear models.
+              columns:
+                - {key: model, label: model}
+                - {key: features, label: features}
+                - {key: r2, label: R²}
+                - {key: mae, label: MAE}
+              rows:
+                - {model: Linear, features: "median_income", r2: 0.459, mae: "$62,991"}
+                - {model: Linear, features: "income, age, rooms, households", r2: 0.524, mae: "$58,436"}
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: "R² is high but predictions are unusable"
+                  explanation: The target has a natural cap and outliers; aggregate metrics hide local error.
+                  fix: Inspect residuals and error by segment; consider robust metrics.
+                - error: "The model performs far better on training data"
+                  explanation: It has memorised noise, or the evaluation set differs.
+                  fix: Evaluate on held-out data; reduce model complexity.
+                - error: "A coefficient has an implausible sign"
+                  explanation: Multicollinearity or a confounder reversed the relationship.
+                  fix: Inspect feature correlations; do not interpret coefficients in isolation.
+                - error: "Scaling changed the coefficients but not R²"
+                  explanation: Linear regression is scale-equivariant for its predictions.
+                  fix: Scale when interpreting regularised models, not to improve plain OLS fit.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The exercise asks you to build a regression for house value, report
+                R² and MAE, and explain one coefficient in plain language.
+            - type: checklist
+              items:
+                - "I can fit a linear regression and read its coefficients."
+                - "I evaluate on a held-out split."
+                - "I report an error in the target's units."
+                - "I inspect the data for caps, outliers and non-linearity."
+      takeaways:
+        - Regression predicts a continuous target.
+        - Coefficients describe association per unit, not causation.
+        - R² measures explained variance; MAE measures practical error.
+        - More features can help, but must be judged on held-out data.
+      glossary:
+        - term: Coefficient
+          definition: The change in the predicted target per one-unit change in a feature.
+        - term: Residual
+          definition: The difference between an observed and predicted value.
+        - term: R²
+          definition: The proportion of variance in the target explained by the model.
+
+  - slug: logistic-regression
+    title: Logistic Regression and Classification
+    objective: Train a binary classifier, interpret predicted probabilities, and choose a decision threshold.
+    summary: Predict Titanic survival from passenger features and examine how the 0.5 threshold trades false positives against false negatives.
+    estimated_minutes: 17
+    datasets: [titanic]
+    exercises: [classification-titanic]
+    notebook_activity:
+      title: Survival probabilities
+      intro_markdown: |
+        # Logistic Regression
+
+        Classification predicts a probability, then a threshold turns it into a
+        class. Both steps are choices you must be able to defend.
+      cells:
+        - source: |
+            import pandas as pd
+            from sklearn.model_selection import train_test_split
+            from sklearn.linear_model import LogisticRegression
+
+            df = pd.read_csv("/opt/opencs/datasets/titanic/v1/titanic.csv")
+            data = df[["survived", "pclass", "sex", "age", "fare", "sibsp", "parch"]].copy()
+            data["sex"] = (data["sex"] == "female").astype(int)
+            data["age"] = data["age"].fillna(data["age"].median())
+            data["fare"] = data["fare"].fillna(data["fare"].median())
+            X = data.drop(columns="survived")
+            y = data["survived"]
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42, stratify=y)
+            model = LogisticRegression(max_iter=500).fit(X_train, y_train)
+            print("accuracy:", round(model.score(X_test, y_test), 3))
+        - source: |
+            proba = model.predict_proba(X_test)[:5, 1]
+            print("first five survival probabilities:", proba.round(3))
+        - cell_type: markdown
+          source: |
+            ## Change the threshold
+
+            A threshold of 0.5 is a default, not a law.
+        - source: |
+            for threshold in [0.3, 0.5, 0.7]:
+                pred = (model.predict_proba(X_test)[:, 1] >= threshold).astype(int)
+                print(threshold, "predicted survivors:", int(pred.sum()))
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                Survival is binary: 0 or 1. Sex and passenger class are strongly
+                associated with survival: 74.2% of women survived versus 18.9% of men;
+                63.0% of first class versus 24.2% of third class.
+            - type: table
+              caption: Survival rates by sex and class.
+              columns:
+                - {key: group, label: group}
+                - {key: survival_rate, label: survival rate}
+                - {key: passengers, label: passengers}
+              rows:
+                - {group: Female, survival_rate: "74.2%", passengers: 314}
+                - {group: Male, survival_rate: "18.9%", passengers: 577}
+                - {group: First class, survival_rate: "63.0%", passengers: 216}
+                - {group: Second class, survival_rate: "47.3%", passengers: 184}
+                - {group: Third class, survival_rate: "24.2%", passengers: 491}
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: markdown
+              text: |
+                Logistic regression models the **log-odds** of the positive class as a
+                linear function of the features, then applies the logistic function to
+                produce a probability between 0 and 1.
+
+                * `predict_proba` returns probabilities.
+                * `predict` applies a 0.5 threshold by default.
+                * Lowering the threshold catches more positives (higher recall) at the
+                  cost of more false positives (lower precision).
+
+                Coefficients are in log-odds units. A positive coefficient increases the
+                predicted probability; its exact effect depends on the other features.
+            - type: callout
+              variant: info
+              title: Accuracy hides imbalance
+              text: |
+                With 38.4% survivors, predicting "did not survive" for everyone is 61.6%
+                accurate. Precision, recall and the confusion matrix reveal performance
+                that accuracy conceals.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              source: |
+                import pandas as pd
+
+                df = pd.read_csv("/opt/opencs/datasets/titanic/v1/titanic.csv")
+                print(df.groupby("sex").survived.mean().round(3))
+                print(df["survived"].mean().round(3), "overall survival rate")
+            - type: output
+              kind: text
+              text: |
+                sex
+                female    0.742
+                male      0.189
+                Name: survived, dtype: float64
+                0.384 overall survival rate
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              caption: Fit, predict probabilities, then classes.
+              source: |
+                from sklearn.model_selection import train_test_split
+                from sklearn.linear_model import LogisticRegression
+                from sklearn.metrics import accuracy_score
+
+                data = df[["survived", "pclass", "sex", "age", "fare", "sibsp", "parch"]].copy()
+                data["sex"] = (data["sex"] == "female").astype(int)
+                data["age"] = data["age"].fillna(data["age"].median())
+                data["fare"] = data["fare"].fillna(data["fare"].median())
+
+                X = data.drop(columns="survived")
+                y = data["survived"]
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=0.25, random_state=42, stratify=y
+                )
+                model = LogisticRegression(max_iter=500).fit(X_train, y_train)
+                proba = model.predict_proba(X_test)[:, 1]
+                print("accuracy:", round(accuracy_score(y_test, model.predict(X_test)), 3))
+                print("first probabilities:", proba[:5].round(3))
+            - type: output
+              kind: text
+              text: |
+                accuracy: 0.78
+                first probabilities: [0.097 0.674 0.123 0.609 0.051]
+            - type: markdown
+              text: |
+                A predicted probability of 0.674 means the model considers survival
+                more likely than not for that passenger. It is a model estimate, not a
+                frequency you should trust without calibration checks.
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: chart
+              title: Survival rate by sex and class
+              caption: Sex is the strongest single split in this table.
+              spec:
+                type: bar
+                x: group
+                y: rate
+                data:
+                  - {group: Female, rate: 0.742}
+                  - {group: Male, rate: 0.189}
+                  - {group: First, rate: 0.630}
+                  - {group: Second, rate: 0.473}
+                  - {group: Third, rate: 0.242}
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: "The model predicts almost everyone as not surviving"
+                  explanation: Class imbalance plus a 0.5 threshold favours the majority class.
+                  fix: Inspect the confusion matrix; adjust the threshold or class weights.
+                - error: "A coefficient is interpreted as a probability change"
+                  explanation: Coefficients are log-odds, not probability points.
+                  fix: Use odds ratios (`np.exp(coef)`) or predicted probabilities at representative values.
+                - error: "Accuracy is high but recall is poor"
+                  explanation: The majority class dominates the accuracy metric.
+                  fix: Report precision, recall and F1; choose a metric aligned with the cost of errors.
+                - error: "The test set contains rows used to choose features"
+                  explanation: Iterative feature selection on test performance leaks information.
+                  fix: Use cross-validation on the training set for selection.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The exercise asks for a classifier, a probability threshold justified
+                by the cost of errors, and a short interpretation of two coefficients.
+            - type: checklist
+              items:
+                - "I can train a binary classifier and get probabilities."
+                - "I understand the effect of the decision threshold."
+                - "I can interpret coefficients as log-odds."
+                - "I choose a metric appropriate to the problem."
+      takeaways:
+        - Logistic regression outputs probabilities; a threshold converts them to classes.
+        - Accuracy is misleading on imbalanced targets.
+        - Coefficients are log-odds; interpret them with care.
+        - Threshold choice encodes the relative cost of false positives and negatives.
+      glossary:
+        - term: Log-odds
+          definition: The logarithm of the odds of the positive class.
+        - term: Decision threshold
+          definition: The probability cutoff used to assign the positive class.
+        - term: Probability calibration
+          definition: Whether predicted probabilities match observed frequencies.

@@ -1,0 +1,37 @@
+apiVersion: v2
+name: opencs
+description: >-
+  OpenCS Labs - a multi-user Data Analysis and Data Science teaching platform:
+  FastAPI backend, React/nginx frontend, JupyterHub with KubeSpawner notebook
+  pods, PostgreSQL metadata store, MinIO object storage and a read-only dataset
+  serving tree.
+type: application
+
+# Chart version: bump on every packaged change to this chart.
+version: 1.0.0
+
+# Application/image version the chart defaults to. Override with
+# `--set global.imageTag=x.y.z` or per-component image tags.
+appVersion: "1.0.0"
+
+keywords:
+  - jupyterhub
+  - data-science
+  - education
+  - fastapi
+  - kubernetes
+
+home: https://github.com/opencs-labs/opencs-labs
+sources:
+  - https://github.com/opencs-labs/opencs-labs
+
+maintainers:
+  - name: OpenCS Labs Platform Team
+    email: platform@opencs.example.edu
+
+annotations:
+  # JupyterHub and its KubeSpawner are deployed as a subchart dependency.
+  # z2jh is added by the operator (see NOTES.txt) because it carries its own
+  # CRDs-free but version-sensitive upgrade path; pin the version you test.
+  category: Education
+  opencs.example.edu/rawManifests: infrastructure/kubernetes

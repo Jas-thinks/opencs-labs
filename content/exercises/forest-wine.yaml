@@ -1,0 +1,71 @@
+slug: forest-wine
+title: Random Forest on Wine Quality
+topic: Trees and Random Forest
+difficulty: Medium
+position: 190
+estimated_minutes: 20
+datasets: [wine-quality]
+related_lesson: random-forests
+objective: Train a random forest, measure the gain over a single tree, and read feature importance cautiously.
+instructions:
+  markdown: |
+    Using the same split as the tree exercise, train a random forest.
+
+    Produce:
+
+    * `forest` — `RandomForestClassifier(n_estimators=200, random_state=42)` fitted on the training split.
+    * `train_accuracy`, `test_accuracy`.
+    * `importances` — feature importances as a Series, sorted descending.
+    * `comparison` — one sentence comparing the forest with a single tree on held-out data.
+starter_notebook:
+  intro_markdown: |
+    # Random Forest on Wine Quality
+
+    **Objective:** average many decorrelated trees and measure the honest gain.
+  cells:
+    - source: |
+        import pandas as pd
+        from sklearn.model_selection import train_test_split
+        from sklearn.ensemble import RandomForestClassifier
+
+        df = pd.read_csv("/opt/opencs/datasets/wine-quality/v1/winequality-red.csv")
+        df["good"] = (df["quality"] >= 6).astype(int)
+        X = df.drop(columns=["quality", "good"])
+        y = df["good"]
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.25, random_state=42, stratify=y
+        )
+    - source: |
+        forest = None  # TODO
+        train_accuracy = None  # TODO
+        test_accuracy = None   # TODO
+        print(train_accuracy, test_accuracy)
+    - source: |
+        importances = None  # TODO: Series sorted descending
+        comparison = ""     # TODO: one sentence
+        print(importances.head() if importances is not None else None)
+hints:
+  - "Fit with `RandomForestClassifier(n_estimators=200, random_state=42)`."
+  - "Importances: `pd.Series(forest.feature_importances_, index=X.columns).sort_values(ascending=False)`."
+  - "A single deep tree reached about 0.735 held-out; the forest reaches about 0.782."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 120
+  tests:
+    - id: accuracy
+      description: train is perfect and held-out accuracy is about 0.782
+      code: |
+        assert abs(float(train_accuracy) - 1.0) < 1e-9, train_accuracy
+        assert abs(float(test_accuracy) - 0.782) < 0.02, test_accuracy
+    - id: importances
+      description: feature importances are a normalised Series led by alcohol
+      code: |
+        import pandas as pd
+        assert isinstance(importances, pd.Series)
+        assert abs(float(importances.sum()) - 1.0) < 1e-6
+        assert importances.index[0] == "alcohol", importances.head()
+    - id: comparison
+      description: comparison mentions the forest and held-out data
+      code: |
+        text = str(comparison).lower()
+        assert "forest" in text and ("test" in text or "held-out" in text or "held out" in text), comparison

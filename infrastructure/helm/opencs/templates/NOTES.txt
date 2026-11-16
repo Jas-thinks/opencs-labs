@@ -1,0 +1,241 @@
+{{- /*
+Post-install / post-upgrade instructions.
+
+Rendered by `helm install` and `helm upgrade`; also readable on demand with
+`helm get notes <release> -n <namespace>`. Keep this actionable: it should be
+possible to go from `helm install` to a working origin by following it top to
+bottom.
+*/ -}}
+{{- $namespace := .Release.Namespace -}}
+{{- $hubNamespace := .Values.global.hubNamespace -}}
+{{- $origin := .Values.global.origin -}}
+{{- $backendName := printf "%s-backend" (include "opencs.fullname" .) -}}
+{{- $frontendName := printf "%s-frontend" (include "opencs.fullname" .) -}}
+{{- $secretName := include "opencs.secretName" . -}}
+{{- $pvcName := include "opencs.datasetsPvcName" . -}}
+{{ printf "OpenCS Labs %s installed as release %q in namespace %q." .Chart.AppVersion .Release.Name $namespace }}
+{{ if .Release.IsInstall }}{{ printf "Chart %s (appVersion %s)." (include "opencs.chart" .) .Chart.AppVersion }}{{ end }}
+
+             Public origin: {{ $origin }}
+            Backend image: {{ include "opencs.image" (dict "image" .Values.backend.image "root" .) }}
+           Frontend image: {{ include "opencs.image" (dict "image" .Values.frontend.image "root" .) }}
+             Notebook image: {{ .Values.jupyterhub.kubeSpawner.image.name }}:{{ .Values.jupyterhub.kubeSpawner.image.tag }}
+               Ingress host: {{ if .Values.ingress.enabled }}{{ .Values.ingress.host }}{{ else }}(ingress disabled){{ end }}
+              Dataset PVC: {{ $pvcName }} -> mounted read-only at {{ .Values.jupyterhub.kubeSpawner.datasets.mountPath }}
+
+  THIS CHART RENDERS: backend Deployment/Service/ServiceAccount, frontend
+  Deployment/Service, ConfigMap, Ingress (+ JupyterHub proxy alias), and
+  optionally the credentials Secret. PostgreSQL, MinIO, JupyterHub and the
+  dataset PVC are deployed from infrastructure/kubernetes/*.yaml or your own
+  operators -- the values in this release describe them so the two paths agree.
+
+------------------------------------------------------------------------------
+1. VERIFY THE RELEASE CAME UP
+------------------------------------------------------------------------------
+  kubectl -n {{ $namespace }} get deploy,svc,ing,cm
+  kubectl -n {{ $namespace }} rollout status deploy/{{ $backendName }} --timeout=180s
+  kubectl -n {{ $namespace }} rollout status deploy/{{ $frontendName }} --timeout=180s
+
+  # The backend refuses to start with an invalid production configuration, so
+  # read its logs first if a pod CrashLoopBackOffs.
+  kubectl -n {{ $namespace }} logs deploy/{{ $backendName }} --tail=100
+
+  # Health endpoints (in-cluster):
+  kubectl -n {{ $namespace }} run curl-check --rm -it --restart=Never \
+    --image=curlimages/curl:8.8.0 -- \
+    curl -fsS http://{{ $backendName }}.{{ $namespace }}.svc.cluster.local/health
+  kubectl -n {{ $namespace }} run curl-check --rm -it --restart=Never \
+    --image=curlimages/curl:8.8.0 -- \
+    curl -fsS http://{{ $backendName }}.{{ $namespace }}.svc.cluster.local/ready
+
+------------------------------------------------------------------------------
+2. SECRETS  (blocking -- the backend will not start without these)
+------------------------------------------------------------------------------
+{{ if .Values.backend.existingSecret }}
+  This release consumes the pre-existing Secret {{ $secretName }};
+  the chart does not create or modify it.
+
+  Required keys:
+    OPENCE_JWT_SECRET            >= 32 chars, e.g. python3 -c 'import secrets;print(secrets.token_urlsafe(48))'
+    OPENCE_JUPYTERHUB_API_TOKEN  the same value configured in the Hub
+    OPENCE_DATABASE_URL          postgresql+psycopg://opencs:<pw>@postgres.{{ $namespace }}.svc.cluster.local:5432/opencs
+    OPENCE_S3_ACCESS_KEY         MinIO credential
+    OPENCE_S3_SECRET_KEY         MinIO credential
+    OPENCE_OIDC_CLIENT_SECRET    institutional OIDC client secret
+    POSTGRES_PASSWORD            same password as in OPENCE_DATABASE_URL
+    MINIO_ROOT_USER              MinIO root identity
+    MINIO_ROOT_PASSWORD          MinIO root password
+
+  Check which keys exist without printing values:
+    kubectl -n {{ $namespace }} get secret {{ $secretName }} -o jsonpath='{.data}' | tr ',' '\n'
+
+  Create it out-of-band (recommended: External Secrets / Sealed Secrets):
+    kubectl -n {{ $namespace }} create secret generic {{ $secretName }} \
+      --from-literal=OPENCE_JWT_SECRET="$(python3 -c 'import secrets;print(secrets.token_urlsafe(48))')" \
+      --from-literal=OPENCE_JUPYTERHUB_API_TOKEN="<hub-api-token>" \
+      --from-literal=OPENCE_DATABASE_URL="postgresql+psycopg://opencs:<pw>@postgres.{{ $namespace }}.svc.cluster.local:5432/opencs" \
+      --from-literal=OPENCE_S3_ACCESS_KEY="<minio-access-key>" \
+      --from-literal=OPENCE_S3_SECRET_KEY="<minio-secret-key>" \
+      --from-literal=OPENCE_OIDC_CLIENT_SECRET="<oidc-client-secret>" \
+      --from-literal=POSTGRES_PASSWORD="<pw>" \
+      --from-literal=MINIO_ROOT_USER="<minio-root-user>" \
+      --from-literal=MINIO_ROOT_PASSWORD="<minio-root-password>"
+
+  Then restart the workloads that read it:
+    kubectl -n {{ $namespace }} rollout restart deploy/{{ $backendName }}
+    kubectl -n {{ $namespace }} rollout restart sts/postgres sts/minio
+{{- else }}
+  This release rendered a Secret from .Values.backend.secret.data.
+  THAT IS A LAB/STAGING MODE ONLY. Verify by hand:
+    kubectl -n {{ $namespace }} get secret {{ $secretName }} -o jsonpath='{.data}' | tr ',' '\n'
+
+  For production, move to an out-of-band Secret and set
+  backend.existingSecret={{ $secretName }} with backend.secret.create=false,
+  so no credential passes through values.yaml or Helm's release history.
+{{- end }}
+
+------------------------------------------------------------------------------
+3. DEPENDENCIES: POSTGRESQL, MINIO, DATASET PVC
+------------------------------------------------------------------------------
+  Deploy them once, in this order (they are prerequisites for the backend):
+
+    kubectl apply -f infrastructure/kubernetes/namespace.yaml
+    kubectl apply -f infrastructure/kubernetes/datasets-pvc.yaml   # PVC + sync Job
+    kubectl apply -f infrastructure/kubernetes/postgres.yaml
+    kubectl apply -f infrastructure/kubernetes/minio.yaml           # STS + init Job
+
+  Wait for them:
+    kubectl -n {{ $namespace }} rollout status sts/postgres --timeout=180s
+    kubectl -n {{ $namespace }} rollout status sts/minio    --timeout=180s
+    kubectl -n {{ $namespace }} wait --for=condition=complete job/minio-init --timeout=300s
+
+  The values in this release assume:
+    * PostgreSQL Service `postgres.{{ $namespace }}.svc.cluster.local:5432`,
+      database `{{ .Values.postgres.auth.database }}`, user `{{ .Values.postgres.auth.username }}`.
+    * MinIO Service `minio.{{ $namespace }}.svc.cluster.local:9000`,
+      bucket `{{ .Values.minio.bucket.name }}` (created by the minio-init Job).
+    * PVC `{{ $pvcName }}` for the read-only dataset serving tree.
+
+  Apply schema migrations once PostgreSQL is Ready (Alembic ships in the image):
+    kubectl -n {{ $namespace }} exec -it deploy/{{ $backendName }} -- alembic upgrade head
+
+  Seed demo content and the dataset catalogue (development/staging only):
+    kubectl -n {{ $namespace }} exec -it deploy/{{ $backendName }} -- python scripts/seed.py
+
+  MinIO console is cluster-internal only; reach it with a port-forward:
+    kubectl -n {{ $namespace }} port-forward svc/minio 9001:9001
+
+------------------------------------------------------------------------------
+4. DATASETS  (read-only serving tree)
+------------------------------------------------------------------------------
+  Notebook pods read {{ .Values.jupyterhub.kubeSpawner.datasets.mountPath }}
+  from PVC {{ $pvcName }}. Populate it before students arrive:
+
+    # 1. Build and verify manifests locally (repo root, needs network):
+    make fetch-datasets
+
+    # 2. Upload the serving tree to MinIO (idempotent; unchanged objects are
+    #    skipped by comparing the recorded sha256):
+    make sync-datasets
+
+    # 3. Materialise the served tree onto the PVC and verify every sha256:
+    kubectl -n {{ $namespace }} delete job datasets-sync --ignore-not-found
+    kubectl apply -f infrastructure/kubernetes/datasets-pvc.yaml
+    kubectl -n {{ $namespace }} wait --for=condition=complete job/datasets-sync --timeout=1800s
+    kubectl -n {{ $namespace }} logs job/datasets-sync --tail=50
+
+  See infrastructure/storage/README.md for the full lifecycle and the
+  DATASETS_SYNC_MODE options (all | upload | materialise). datasets/serving is
+  git-ignored and is not baked into the backend image, so a fresh cluster
+  usually runs materialise against a bucket that CI populated.
+
+  Verify the tree exists and is readable by uid 1000:
+    kubectl -n {{ $namespace }} run ds-check --rm -it --restart=Never \
+      --image={{ .Values.jupyterhub.kubeSpawner.image.name }}:{{ .Values.jupyterhub.kubeSpawner.image.tag }} \
+      --overrides='{"spec":{"securityContext":{"runAsUser":1000,"runAsGroup":1000},"volumes":[{"name":"ds","persistentVolumeClaim":{"claimName":"{{ $pvcName }}","readOnly":true}}],"containers":[{"name":"ds-check","image":"{{ .Values.jupyterhub.kubeSpawner.image.name }}:{{ .Values.jupyterhub.kubeSpawner.image.tag }}","command":["ls","-R","{{ .Values.jupyterhub.kubeSpawner.datasets.mountPath }}"],"volumeMounts":[{"name":"ds","mountPath":"{{ .Values.jupyterhub.kubeSpawner.datasets.mountPath }}","readOnly":true}]}]}}'
+
+------------------------------------------------------------------------------
+5. JUPYTERHUB  (installed separately -- see values.yaml `jupyterhub:` block)
+------------------------------------------------------------------------------
+  The Hub lives in {{ $hubNamespace }} and is NOT created by this chart.
+  Install it with a values file that mirrors the `jupyterhub:` block here:
+
+    helm repo add jupyterhub https://hub.jupyter.org/helm-chart/
+    helm repo update
+    helm upgrade --install jupyterhub jupyterhub/jupyterhub \
+      --namespace {{ $hubNamespace }} --create-namespace \
+      --version {{ .Values.jupyterhub.chart.version }} \
+      --values infrastructure/helm/jupyterhub-values.yaml
+
+  The Hub must be configured with:
+    * proxy.service.type: {{ .Values.jupyterhub.proxy.service.type }} (the OpenCS Ingress is the only browser entry point)
+    * public_url / JupyterHub.bind_url: {{ $origin }}
+    * the OpenCS authenticator validating OPENCE_JWT_SECRET
+    * KubeSpawner image {{ .Values.jupyterhub.kubeSpawner.image.name }}:{{ .Values.jupyterhub.kubeSpawner.image.tag }},
+      uid/gid {{ .Values.jupyterhub.kubeSpawner.uid }}/{{ .Values.jupyterhub.kubeSpawner.gid }},
+      {{ .Values.jupyterhub.kubeSpawner.cpu.request }}/{{ .Values.jupyterhub.kubeSpawner.cpu.limit }} CPU,
+      {{ .Values.jupyterhub.kubeSpawner.memory.request }}/{{ .Values.jupyterhub.kubeSpawner.memory.limit }} memory,
+      {{ .Values.jupyterhub.kubeSpawner.storage.capacity }} home PVC,
+      idle cull after {{ .Values.jupyterhub.kubeSpawner.idleCuller.timeoutSeconds }}s
+    * PVC {{ $pvcName }} mounted read-only at {{ .Values.jupyterhub.kubeSpawner.datasets.mountPath }}
+    * automountServiceAccountToken: false
+
+  Then confirm the hub API the backend calls is reachable:
+    kubectl -n {{ $hubNamespace }} get svc hub proxy-public
+    kubectl -n {{ $namespace }} exec -it deploy/{{ $backendName }} -- \
+      python -c "import os,urllib.request as u;r=u.Request(os.environ['OPENCE_JUPYTERHUB_API_URL']+'/info',headers={'Authorization':'token '+os.environ['OPENCE_JUPYTERHUB_API_TOKEN']});print(u.urlopen(r).status)"
+
+  If the JupyterHub proxy Service is not named proxy-public in {{ $hubNamespace }},
+  update ingress.hubProxyAlias.externalName and re-run `helm upgrade`.
+
+------------------------------------------------------------------------------
+6. INGRESS / TLS
+------------------------------------------------------------------------------
+{{ if .Values.ingress.enabled -}}
+  Host: {{ .Values.ingress.host }}   TLS Secret: {{ .Values.ingress.tls.secretName }}
+
+  Point DNS for {{ .Values.ingress.host }} at the ingress controller's address:
+    kubectl -n ingress-nginx get svc ingress-nginx-controller
+
+  The WebSocket snippet annotation requires `allow-snippet-annotations: "true"`
+  on the ingress-nginx controller ConfigMap; without it the snippet is
+  silently dropped and terminals/kernel channels break for HTTP/2 clients.
+
+  Confirm the route table:
+    kubectl -n {{ $namespace }} describe ingress {{ include "opencs.fullname" . }}
+    curl -sI {{ $origin }}/                # SPA shell
+    curl -s  {{ $origin }}/api/v1/config   # backend runtime config
+    curl -sI {{ $origin }}/hub/hub/login   # JupyterHub login
+{{- else -}}
+  Ingress is disabled. Use a port-forward to reach the app:
+    kubectl -n {{ $namespace }} port-forward svc/{{ $frontendName }} 8080:{{ .Values.frontend.service.port }}
+  Browser-side API calls will 404 unless VITE_API_BASE matches your proxy path.
+{{- end }}
+
+------------------------------------------------------------------------------
+7. MONITORING
+------------------------------------------------------------------------------
+{{ if .Values.monitoring.serviceMonitor.enabled -}}
+  ServiceMonitor is enabled (interval {{ .Values.monitoring.serviceMonitor.interval }},
+  path {{ .Values.monitoring.serviceMonitor.path }}). It only takes effect when
+  the Prometheus Operator selects it -- check:
+    kubectl -n {{ $namespace }} get servicemonitor -l release={{ .Values.monitoring.serviceMonitor.labels.release }}
+  Apply the rules and dashboard:
+    kubectl apply -f infrastructure/monitoring/prometheus-rules.yaml
+    kubectl apply -f infrastructure/monitoring/servicemonitor.yaml
+    kubectl -n {{ .Values.monitoring.grafanaDashboard.namespace }} create configmap opencs-dashboard \
+      --from-file=opencs-dashboard.json=infrastructure/monitoring/grafana-dashboard.json
+{{- else -}}
+  ServiceMonitor is disabled. Scraping relies on the pod annotations
+  prometheus.io/scrape / port / path only.
+{{- end }}
+
+------------------------------------------------------------------------------
+8. ROLLBACK
+------------------------------------------------------------------------------
+  helm -n {{ $namespace }} history {{ .Release.Name }}
+  helm -n {{ $namespace }} rollback {{ .Release.Name }} <revision>
+
+  Images are deployed by tag. For a reproducible rollback, deploy by digest:
+  set the component image repository to `<repo>@sha256:<digest>` and keep the
+  previous known-good digest recorded alongside the release.

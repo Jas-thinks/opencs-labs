@@ -1,0 +1,79 @@
+# OpenCS Labs -- PodDisruptionBudgets.
+#
+# Both the API and the SPA run 2 replicas with maxUnavailable: 0 rolling
+# updates, so a voluntary disruption (node drain, cluster upgrade) may take at
+# most one replica at a time and the platform stays serving.
+#
+# These budgets reference the Deployments by their selector labels, so they
+# survive a Helm release rename.
+#
+# Note the arithmetic: with replicas: 2 and minAvailable: 1, a `kubectl drain`
+# evicts one pod, waits for the replacement to become Ready, then proceeds.
+# Scaling to 1 replica would deadlock the drain -- keep replicaCount >= 2
+# (templates/backend-deployment.yaml fails the render if it is set to 0 or 1
+# while this budget is enabled).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: opencs-backend
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/name: opencs-backend
+    app.kubernetes.io/component: api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opencs-backend
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: opencs-frontend
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/name: opencs-frontend
+    app.kubernetes.io/component: web
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opencs-frontend
+---
+# PostgreSQL and MinIO are single-replica StatefulSets: a PDB of
+# minAvailable: 1 would block every node drain that hosts them, which stalls
+# cluster maintenance. Instead we allow the disruption but make it loud -- a
+# drain that takes the database down must be a deliberate, announced action.
+# Set this to minAvailable: 0 and accept a short metadata outage, or move to an
+# HA operator before treating these as production-grade SLAs.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: postgres
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: minio
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: minio

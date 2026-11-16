@@ -1,0 +1,72 @@
+slug: regression-california
+title: Linear Regression for House Values
+topic: Regression and Classification
+difficulty: Medium
+position: 160
+estimated_minutes: 22
+datasets: [california-housing]
+related_lesson: linear-regression
+objective: Fit a regression, report held-out error, and interpret a coefficient in plain language.
+instructions:
+  markdown: |
+    Predict `median_house_value` from `median_income`.
+
+    Produce:
+
+    * `model` — a fitted `LinearRegression` on an 80/20 split with `random_state=42`.
+    * `r2` — held-out R².
+    * `mae` — held-out mean absolute error.
+    * `coef_income` — the fitted coefficient for median income.
+    * `interpretation` — one sentence interpreting that coefficient.
+starter_notebook:
+  intro_markdown: |
+    # Linear Regression for House Values
+
+    **Objective:** fit on training data, evaluate on held-out data, interpret carefully.
+  cells:
+    - source: |
+        import pandas as pd
+        from sklearn.model_selection import train_test_split
+        from sklearn.linear_model import LinearRegression
+        from sklearn.metrics import r2_score, mean_absolute_error
+
+        df = pd.read_csv("/opt/opencs/datasets/california-housing/v1/housing.csv")
+        X = df[["median_income"]]
+        y = df["median_house_value"]
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    - source: |
+        model = None  # TODO
+        predictions = None  # TODO
+        print(model)
+    - source: |
+        r2 = None            # TODO
+        mae = None           # TODO
+        coef_income = None   # TODO
+        interpretation = ""  # TODO: one sentence
+        print(r2, mae, coef_income)
+hints:
+  - "`LinearRegression().fit(X_train, y_train)`."
+  - "Predict on `X_test`, then compare with `r2_score` and `mean_absolute_error`."
+  - "The coefficient is in dollars per unit of median income."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 75
+  tests:
+    - id: fitted
+      description: the model is fitted on a single feature
+      code: |
+        assert model is not None
+        assert hasattr(model, "coef_")
+        assert len(model.coef_) == 1
+    - id: metrics
+      description: held-out R², MAE and coefficient match the expected values
+      code: |
+        assert abs(float(r2) - 0.459) < 0.02, r2
+        assert abs(float(mae) - 62991) < 2500, mae
+        assert abs(float(coef_income) - 41934) < 2500, coef_income
+    - id: interpretation
+      description: the interpretation mentions dollars and is not causal
+      code: |
+        text = str(interpretation).lower()
+        assert "income" in text and "$" in str(interpretation), interpretation
+        assert "cause" not in text and "causes" not in text, interpretation

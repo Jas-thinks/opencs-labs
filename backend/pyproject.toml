@@ -1,0 +1,23 @@
+[project]
+name = "opencs-labs-backend"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers"
+markers = [
+    "postgres: requires a live PostgreSQL database (set OPENCE_TEST_DATABASE_URL)",
+    "docker: requires the Docker daemon and the analytics image",
+    "hub: requires a running JupyterHub",
+    "integration: end-to-end HTTP tests across the whole application",
+    "security: isolation, authorization and credential-handling checks",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:alembic.*",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/seed/*", "tests/*"]

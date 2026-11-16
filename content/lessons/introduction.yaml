@@ -1,0 +1,478 @@
+slug: introduction
+title: Introduction to Data Analysis
+description: What data analysis actually is, how a table is structured, and how to ask answerable questions of real data.
+
+lessons:
+  - slug: what-is-data-analysis
+    title: What is Data Analysis?
+    objective: Describe the analysis workflow and answer a first question from a real table.
+    summary: Use the restaurant tips dataset to move from a question to a filtered table, a statistic and a chart.
+    estimated_minutes: 12
+    datasets: [tips]
+    exercises: [explore-tips-dataset]
+    notebook_activity:
+      title: First look at the tips dataset
+      intro_markdown: |
+        # What is Data Analysis?
+
+        In this activity you will open a real dataset of 244 restaurant bills,
+        inspect its structure, and answer one concrete question:
+
+        > **Which day has the highest average bill?**
+
+        Run the cells in order. Change them. Break them. That is the point.
+      cells:
+        - source: |
+            import pandas as pd
+
+            df = pd.read_csv("/opt/opencs/datasets/tips/v1/tips.csv")
+            df.head()
+        - cell_type: markdown
+          source: |
+            ## Shape and columns
+
+            `shape` tells us (rows, columns). `columns` lists the variables.
+        - source: |
+            print(df.shape)
+            print(df.columns.tolist())
+        - cell_type: markdown
+          source: |
+            ## One question, one aggregation
+
+            Group the bills by day and compute the mean of `total_bill`.
+        - source: |
+            df.groupby("day")["total_bill"].mean().sort_values()
+        - cell_type: markdown
+          source: |
+            ## Try it
+
+            1. Replace `mean` with `count` — how many bills per day?
+            2. Compute `max` instead of `mean`.
+            3. Which day has the largest single bill?
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                Data analysis starts with a **question**, not with code. Suppose a
+                restaurant owner asks: *"Should we staff more people on Sunday?"*
+                To answer it we need evidence from the bills they already recorded.
+
+                Here are the first rows of the `tips` dataset — 244 real restaurant
+                bills. Each row is one table (one party), each column is something we
+                recorded about it.
+            - type: table
+              caption: First three rows of tips.csv.
+              columns:
+                - {key: total_bill, label: total_bill}
+                - {key: tip, label: tip}
+                - {key: sex, label: sex}
+                - {key: smoker, label: smoker}
+                - {key: day, label: day}
+                - {key: time, label: time}
+                - {key: size, label: size}
+              rows:
+                - {total_bill: 16.99, tip: 1.01, sex: Female, smoker: No, day: Sun, time: Dinner, size: 2}
+                - {total_bill: 10.34, tip: 1.66, sex: Male, smoker: No, day: Sun, time: Dinner, size: 3}
+                - {total_bill: 21.01, tip: 3.5, sex: Male, smoker: No, day: Sun, time: Dinner, size: 3}
+            - type: callout
+              variant: info
+              title: A row is an observation
+              text: |
+                This table has 244 rows and 7 columns. "Rows" are usually called
+                **observations** or **records**; "columns" are **variables** or
+                **features**. Almost every dataset you meet will map onto this shape.
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: markdown
+              text: |
+                Analysis is a loop, not a straight line:
+
+                1. **Ask** a question that data could answer.
+                2. **Inspect** what you actually have.
+                3. **Transform** it into the shape the question needs.
+                4. **Summarise** or **visualise** it.
+                5. **Interpret** carefully and state the limits.
+
+                A good analysis question names a *population*, a *measurement* and a
+                *comparison*. "Which day has the highest average bill?" is answerable
+                with this table. "Is the food good?" is not — nothing here measures
+                food quality.
+            - type: steps
+              items:
+                - title: Ask
+                  text: "Which day has the highest average total bill?"
+                - title: Inspect
+                  text: Check the columns, the number of rows and whether values are missing.
+                - title: Transform
+                  text: Group rows by `day` so each day becomes one group.
+                - title: Summarise
+                  text: Compute the mean `total_bill` per group.
+                - title: Interpret
+                  text: Compare the means in context; ask whether the difference is large enough to matter.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              caption: Load the dataset and look at its structure.
+              source: |
+                import pandas as pd
+
+                df = pd.read_csv("/opt/opencs/datasets/tips/v1/tips.csv")
+                print(df.shape)
+                print(df.columns.tolist())
+                print(df.dtypes)
+            - type: output
+              kind: text
+              text: |
+                (244, 7)
+                ['total_bill', 'tip', 'sex', 'smoker', 'day', 'time', 'size']
+                total_bill     float64
+                tip            float64
+                sex             object
+                smoker          object
+                day             object
+                time            object
+                size             int64
+                dtype: object
+            - type: markdown
+              text: |
+                `float64` and `int64` are numbers. `object` usually means text.
+                Noticing that distinction early prevents a large class of bugs — you
+                cannot compute an average of a column that was read as text.
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              caption: Group bills by day and compute the average.
+              source: |
+                by_day = df.groupby("day")["total_bill"].mean().sort_values()
+                print(by_day.round(2))
+            - type: output
+              kind: text
+              text: |
+                day
+                Fri     17.15
+                Thur    17.68
+                Sat     20.44
+                Sun     21.41
+                Name: total_bill, dtype: float64
+            - type: markdown
+              text: |
+                Sunday has the highest average bill (21.41), Friday the lowest (17.15).
+                But an average alone is not a conclusion: Friday has only 19 bills,
+                while Sunday has 76. Small groups produce unstable averages. Always
+                ask **how many observations** sit behind a statistic.
+            - type: table
+              caption: Bills per day alongside the average bill.
+              columns:
+                - {key: day, label: day}
+                - {key: bills, label: bills}
+                - {key: avg_bill, label: avg total_bill}
+                - {key: avg_tip, label: avg tip}
+              rows:
+                - {day: Fri, bills: 19, avg_bill: 17.15, avg_tip: 2.73}
+                - {day: Sat, bills: 87, avg_bill: 20.44, avg_tip: 2.99}
+                - {day: Sun, bills: 76, avg_bill: 21.41, avg_tip: 3.26}
+                - {day: Thur, bills: 62, avg_bill: 17.68, avg_tip: 2.77}
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: markdown
+              text: |
+                A chart makes the comparison visible. The bar height is the average
+                bill; the caption carries the sample size so the reader cannot forget it.
+            - type: chart
+              title: Average total bill by day
+              caption: Friday's bar is based on only 19 bills; Sunday's on 76.
+              spec:
+                type: bar
+                x: day
+                y: avg_bill
+                data:
+                  - {day: Fri, avg_bill: 17.15, bills: 19}
+                  - {day: Thur, avg_bill: 17.68, bills: 62}
+                  - {day: Sat, avg_bill: 20.44, bills: 87}
+                  - {day: Sun, avg_bill: 21.41, bills: 76}
+            - type: callout
+              variant: tip
+              title: Charts are arguments
+              text: |
+                A chart should answer the question it was drawn for. If a reader
+                needs the code to interpret your chart, the chart is not finished.
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: "`df.day.mean()` raises `TypeError`"
+                  explanation: You asked for the mean of a text column.
+                  fix: Select a numeric column first, then aggregate it — or use `groupby`.
+                - error: "The average looks wrong because one column is text"
+                  explanation: A numeric column containing one stray value like `"?"` is read as `object`.
+                  fix: Inspect `df.dtypes` and convert explicitly with `pd.to_numeric(df[col], errors="coerce")`.
+                - error: "Concluding the restaurant is busiest on Sunday"
+                  explanation: The table records bills, not all customers; it is also a small historical sample.
+                  fix: State what the data measures and the population it came from before drawing a conclusion.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The matching exercise asks you to explore the same dataset and answer
+                three questions with code. Open it in Practice, or launch the notebook
+                activity above and experiment first.
+            - type: checklist
+              items:
+                - "I can explain the difference between a row and a column."
+                - "I can load a CSV and inspect its shape and dtypes."
+                - "I can compute a grouped average and say which group is largest."
+                - "I check how many observations support each statistic."
+      takeaways:
+        - Analysis starts from a question and ends with a careful, limited statement.
+        - Rows are observations; columns are variables with types.
+        - Grouped averages answer comparison questions, but always report group sizes.
+        - Text columns cannot be averaged; check dtypes before computing.
+      glossary:
+        - term: Observation
+          definition: One row in a tabular dataset.
+        - term: Variable
+          definition: One column; a measured property of each observation.
+        - term: Aggregation
+          definition: Reducing many rows to a smaller summary, such as a mean or count per group.
+
+  - slug: tables-types-missingness
+    title: Tables, Types and Missingness
+    objective: Inspect a real dataset's schema, identify missing values, and choose a defensible handling strategy.
+    summary: Use the Titanic passenger table to read dtypes, count nulls, and see why "missing" is not the same as zero.
+    estimated_minutes: 14
+    datasets: [titanic]
+    exercises: [inspect-titanic-schema]
+    notebook_activity:
+      title: Inspect missing data in the Titanic table
+      intro_markdown: |
+        # Tables, Types, Missingness
+
+        The Titanic table contains genuine missing values. Your job is to find
+        them, explain them, and then decide what to do — not to delete rows
+        reflexively.
+      cells:
+        - source: |
+            import pandas as pd
+
+            df = pd.read_csv("/opt/opencs/datasets/titanic/v1/titanic.csv")
+            df.info()
+        - cell_type: markdown
+          source: |
+            ## Missing counts
+        - source: |
+            missing = df.isna().sum()
+            missing[missing > 0].sort_values(ascending=False)
+        - cell_type: markdown
+          source: |
+            ## A defensible fill
+
+            Age is missing for 177 passengers. Compare the mean and median before
+            choosing a fill value.
+        - source: |
+            print("mean age:", round(df.age.mean(), 2))
+            print("median age:", round(df.age.median(), 2))
+            df["age_filled"] = df["age"].fillna(df["age"].median())
+            print("remaining missing ages:", int(df.age_filled.isna().sum()))
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                The Titanic table describes 891 passengers. Some facts were never
+                recorded — for example, the age of 177 passengers and the cabin of
+                688. Those blanks are part of the data, not an accident.
+            - type: table
+              caption: Selected columns from the first three passengers.
+              columns:
+                - {key: survived, label: survived}
+                - {key: pclass, label: pclass}
+                - {key: sex, label: sex}
+                - {key: age, label: age}
+                - {key: fare, label: fare}
+                - {key: deck, label: deck}
+              rows:
+                - {survived: 0, pclass: 3, sex: male, age: 22.0, fare: 7.25, deck: null}
+                - {survived: 1, pclass: 1, sex: female, age: 38.0, fare: 71.2833, deck: C}
+                - {survived: 1, pclass: 3, sex: female, age: 26.0, fare: 7.925, deck: null}
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: markdown
+              text: |
+                Three ideas do most of the work here:
+
+                * **Type**: numeric (`int64`, `float64`), boolean, or text (`object`).
+                * **Cardinality**: how many distinct values a column has. `sex` has 2;
+                  `fare` has many.
+                * **Missingness**: `NaN` means *unknown*. It does **not** mean zero.
+
+                `deck` is missing for 688 of 891 passengers (77%). Filling 77% of a
+                column with a guess would mostly be inventing data. Dropping the
+                column, or treating "no deck recorded" as its own category, is usually
+                more honest.
+            - type: callout
+              variant: warning
+              title: Mean vs median
+              text: |
+                Age has mean 29.70 and median 28.0. The mean is pulled upward by a
+                small number of older passengers. For a skewed column, the median is
+                often the safer fill value.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              caption: Ask pandas what it knows about each column.
+              source: |
+                import pandas as pd
+
+                df = pd.read_csv("/opt/opencs/datasets/titanic/v1/titanic.csv")
+                df.info()
+            - type: output
+              kind: text
+              text: |
+                <class 'pandas.core.frame.DataFrame'>
+                RangeIndex: 891 entries, 0 to 890
+                Data columns (total 15 columns):
+                 #   Column       Non-Null Count  Dtype
+                ---  ------       --------------  -----
+                 0   survived     891 non-null    int64
+                 1   pclass       891 non-null    int64
+                 2   sex          891 non-null    object
+                 3   age          714 non-null    float64
+                 4   sibsp        891 non-null    int64
+                 5   parch        891 non-null    int64
+                 6   fare         891 non-null    float64
+                 7   embarked     889 non-null    object
+                 8   class        891 non-null    object
+                 9   who          891 non-null    object
+                 10  adult_male   891 non-null    bool
+                 11  deck         203 non-null    object
+                 12  embark_town  889 non-null    object
+                 13  alive        891 non-null    object
+                 14  alone        891 non-null    bool
+                dtypes: bool(2), float64(2), int64(4), object(7)
+            - type: code
+              language: python
+              caption: Count missing values per column, worst first.
+              source: |
+                missing = df.isna().sum()
+                print(missing[missing > 0].sort_values(ascending=False))
+            - type: output
+              kind: text
+              text: |
+                deck           688
+                age            177
+                embarked         2
+                embark_town      2
+                dtype: int64
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: markdown
+              text: |
+                A defensible cleaning decision names the column, the amount missing,
+                the method, and the reason. Here we drop `deck` (77% missing) and fill
+                `age` with the median (14% missing, skewed distribution).
+            - type: code
+              language: python
+              source: |
+                cleaned = df.drop(columns=["deck"]).copy()
+                median_age = cleaned["age"].median()
+                cleaned["age"] = cleaned["age"].fillna(median_age)
+                cleaned = cleaned.dropna(subset=["embarked"])
+
+                print("rows before:", len(df))
+                print("rows after: ", len(cleaned))
+                print("remaining nulls:", int(cleaned.isna().sum().sum()))
+            - type: output
+              kind: text
+              text: |
+                rows before: 891
+                rows after:  889
+                remaining nulls: 0
+            - type: callout
+              variant: info
+              title: Every choice is a claim
+              text: |
+                Filling 177 ages with 28.0 does not recover the true ages; it shrinks
+                the variance. Write down the choice so a reader can disagree with it.
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: chart
+              title: Missing values per column
+              caption: deck is missing for 77% of passengers; age for 20%.
+              spec:
+                type: bar
+                x: column
+                y: missing
+                data:
+                  - {column: age, missing: 177}
+                  - {column: deck, missing: 688}
+                  - {column: embarked, missing: 2}
+                  - {column: embark_town, missing: 2}
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: "`df.age == None` returns all False"
+                  explanation: NaN is never equal to anything, including itself.
+                  fix: Use `df.age.isna()` or `df.age.isnull()`.
+                - error: "`df.fillna(0)` silently changes every column"
+                  explanation: Zero is a real value for counts but not for age or fare.
+                  fix: Fill per column with a justified value, e.g. `df["age"].fillna(df["age"].median())`.
+                - error: "`df.dropna()` removes far more rows than expected"
+                  explanation: By default it drops a row if *any* column is missing.
+                  fix: Use `dropna(subset=["embarked"])` or `how="all"` deliberately.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The exercise asks you to produce a missing-value report and a cleaned
+                copy of the Titanic table without destroying information you still need.
+            - type: checklist
+              items:
+                - "I can read `df.info()` and count missing values per column."
+                - "I know that NaN means unknown, not zero."
+                - "I choose a fill or drop strategy per column and can justify it."
+                - "I verify that my cleaning produced the row count I intended."
+      takeaways:
+        - Missing values are information; measure them before acting.
+        - Prefer the median for skewed numeric columns.
+        - Dropping a mostly-empty column is often more honest than filling it.
+        - Row-level `dropna()` defaults are aggressive; use `subset` deliberately.
+      glossary:
+        - term: NaN
+          definition: Not a Number — pandas' marker for a missing numeric value.
+        - term: Cardinality
+          definition: The number of distinct values in a column.
+        - term: Imputation
+          definition: Replacing a missing value with an estimate, such as the median.

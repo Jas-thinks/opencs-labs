@@ -1,0 +1,407 @@
+slug: statistics
+title: Statistics for Data Analysis
+description: Central tendency, spread, sampling and hypothesis tests — the reasoning behind the summaries.
+
+lessons:
+  - slug: central-tendency-and-spread
+    title: Mean, Median and Spread
+    objective: Choose an appropriate measure of centre and quantify spread with standard deviation and the IQR.
+    summary: Compare mean and median on the wine alcohol column and explain why a single average can hide an important tail.
+    estimated_minutes: 15
+    datasets: [wine-quality]
+    exercises: [stats-wine-spread]
+    notebook_activity:
+      title: Centre and spread in wine alcohol
+      intro_markdown: |
+        # Mean, Median and Spread
+
+        Two datasets can share a mean and differ wildly in spread. This notebook
+        makes the difference visible.
+      cells:
+        - source: |
+            import pandas as pd
+
+            df = pd.read_csv("/opt/opencs/datasets/wine-quality/v1/winequality-red.csv")
+            alcohol = df["alcohol"]
+            print("mean  :", round(alcohol.mean(), 3))
+            print("median:", round(alcohol.median(), 3))
+            print("std   :", round(alcohol.std(), 3))
+        - source: |
+            q1, q3 = alcohol.quantile([0.25, 0.75])
+            print("IQR:", round(q3 - q1, 3), "bounds:", round(q1, 2), round(q3, 2))
+        - cell_type: markdown
+          source: |
+            ## Effect of a single extreme value
+        - source: |
+            import numpy as np
+            sample = np.array([9.4, 9.8, 10.2, 10.5, 11.0])
+            with_outlier = np.append(sample, 40.0)
+            for name, values in [("original", sample), ("with outlier", with_outlier)]:
+                print(name, "mean:", round(values.mean(), 2), "median:", round(np.median(values), 2))
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                Wine alcohol content ranges from 8.4% to 14.9%, with mean 10.42 and
+                median 10.2. The mean sits slightly above the median because the
+                distribution has a longer right tail (skew 0.861).
+            - type: chart
+              title: Alcohol content distribution
+              caption: Most wines sit between 9.5% and 11.1%; a thin right tail reaches 14.9%.
+              spec:
+                type: histogram
+                x: alcohol
+                bins: 12
+                data:
+                  - {alcohol: 8.4}
+                  - {alcohol: 9.0}
+                  - {alcohol: 9.4}
+                  - {alcohol: 9.5}
+                  - {alcohol: 9.6}
+                  - {alcohol: 9.8}
+                  - {alcohol: 9.9}
+                  - {alcohol: 10.0}
+                  - {alcohol: 10.2}
+                  - {alcohol: 10.4}
+                  - {alcohol: 10.5}
+                  - {alcohol: 10.8}
+                  - {alcohol: 11.0}
+                  - {alcohol: 11.1}
+                  - {alcohol: 11.4}
+                  - {alcohol: 11.8}
+                  - {alcohol: 12.0}
+                  - {alcohol: 12.5}
+                  - {alcohol: 13.0}
+                  - {alcohol: 14.9}
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: markdown
+              text: |
+                * **Mean** uses every value and is pulled by extremes.
+                * **Median** is the middle value; robust to extremes.
+                * **Standard deviation** is the typical distance from the mean, in the
+                  same units as the data.
+                * **IQR** is the range of the middle 50% of values; robust to extremes.
+
+                Report centre and spread together. "Mean 10.42" without a spread says
+                little about what a typical wine looks like.
+            - type: callout
+              variant: warning
+              title: Standard deviation is not standard error
+              text: |
+                Standard deviation describes the spread of observations. Standard error
+                describes uncertainty in an estimated mean and shrinks as sample size
+                grows. They are not interchangeable.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              source: |
+                import pandas as pd
+
+                df = pd.read_csv("/opt/opencs/datasets/wine-quality/v1/winequality-red.csv")
+                print(df["alcohol"].describe().round(3))
+            - type: output
+              kind: text
+              text: |
+                count    1599.000
+                mean       10.423
+                std         1.066
+                min         8.400
+                25%         9.500
+                50%        10.200
+                75%        11.100
+                max        14.900
+                Name: alcohol, dtype: float64
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              caption: A single extreme value moves the mean, not the median.
+              source: |
+                import numpy as np
+
+                sample = np.array([9.4, 9.8, 10.2, 10.5, 11.0])
+                with_outlier = np.append(sample, 40.0)
+                for name, values in [("original", sample), ("with outlier", with_outlier)]:
+                    print(name, "mean:", round(values.mean(), 2), "median:", round(np.median(values), 2))
+            - type: output
+              kind: text
+              text: |
+                original mean: 10.18 median: 10.2
+                with outlier mean: 15.15 median: 10.35
+            - type: markdown
+              text: |
+                Adding one implausible value moved the mean by five percentage points
+                and the median by 0.15. If your column may contain errors or extremes,
+                the median is usually the safer summary.
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: markdown
+              text: |
+                The table summarises centre and spread for three columns with very
+                different distributions. `residual_sugar` is heavily right-skewed
+                (skew 4.54), so its mean and median diverge.
+            - type: table
+              caption: Centre and spread for selected wine columns.
+              columns:
+                - {key: column, label: column}
+                - {key: mean, label: mean}
+                - {key: median, label: median}
+                - {key: std, label: std}
+                - {key: iqr, label: IQR}
+                - {key: note, label: note}
+              rows:
+                - {column: alcohol, mean: 10.42, median: 10.20, std: 1.07, iqr: 1.6, note: mild right skew}
+                - {column: volatile_acidity, mean: 0.53, median: 0.52, std: 0.18, iqr: 0.25, note: long right tail}
+                - {column: residual_sugar, mean: 2.54, median: 2.20, std: 1.41, iqr: 1.4, note: skew 4.54}
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: "Comparing standard deviations without checking units"
+                  explanation: 1.07 percentage points of alcohol is not comparable to 1.07 grams of sugar.
+                  fix: Compare coefficients of variation or standardised values when units differ.
+                - error: "Reporting the mean of a skewed column as 'typical'"
+                  explanation: The mean is pulled into the tail.
+                  fix: Report median and IQR alongside, or transform the data.
+                - error: "Using ddof=0 and ddof=1 interchangeably"
+                  explanation: Sample and population standard deviations differ slightly.
+                  fix: Be explicit; pandas uses ddof=1 by default.
+                - error: "Averaging averages"
+                  explanation: Group means weighted equally ignore group sizes.
+                  fix: Compute from raw rows, or use a weighted mean.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The exercise asks you to compare centre and spread for wine quality
+                groups, and to decide when the mean is misleading.
+            - type: checklist
+              items:
+                - "I can compute mean, median, standard deviation and IQR."
+                - "I know when the median is preferable."
+                - "I can interpret skew and its effect on the mean."
+                - "I report spread alongside centre."
+      takeaways:
+        - Mean is sensitive to extremes; median is robust.
+        - Standard deviation and IQR quantify spread in different ways.
+        - Skew explains divergence between mean and median.
+        - Never report a centre without a spread.
+      glossary:
+        - term: Standard deviation
+          definition: The typical distance of observations from their mean.
+        - term: IQR
+          definition: The range covered by the middle 50% of observations.
+        - term: Robust statistic
+          definition: A statistic that is not strongly affected by extreme values.
+
+  - slug: hypothesis-testing
+    title: Hypothesis Testing and Effect Size
+    objective: Interpret a two-sample test, state a null hypothesis, and distinguish statistical from practical significance.
+    summary: Test whether smokers tip differently from non-smokers, and see why p = 0.927 is a useful result.
+    estimated_minutes: 16
+    datasets: [tips]
+    exercises: [stats-tips-ab]
+    notebook_activity:
+      title: Did smokers tip differently?
+      intro_markdown: |
+        # Hypothesis Testing
+
+        A test answers: "If there were truly no difference, how surprising would
+        data like ours be?" It does not answer: "Is this difference important?"
+      cells:
+        - source: |
+            import pandas as pd
+            from scipy import stats
+
+            df = pd.read_csv("/opt/opencs/datasets/tips/v1/tips.csv")
+            yes = df[df.smoker == "Yes"].tip
+            no = df[df.smoker == "No"].tip
+            print("n yes:", len(yes), "mean:", round(yes.mean(), 3))
+            print("n no :", len(no), "mean:", round(no.mean(), 3))
+        - source: |
+            result = stats.ttest_ind(yes, no, equal_var=False)
+            print("t:", round(result.statistic, 3))
+            print("p:", round(result.pvalue, 3))
+        - cell_type: markdown
+          source: |
+            ## Effect size
+        - source: |
+            diff = yes.mean() - no.mean()
+            print("difference in mean tip: $", round(diff, 3))
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                Restaurant staff wonder whether smokers tip differently. The tips table
+                has 244 bills: 93 from smokers and 151 from non-smokers. Smokers' mean
+                tip is \$3.009; non-smokers' is \$2.992. The difference is 1.7 cents.
+            - type: table
+              caption: Tip summary by smoker status.
+              columns:
+                - {key: group, label: group}
+                - {key: bills, label: bills}
+                - {key: mean_tip, label: mean tip}
+                - {key: difference, label: difference vs non-smokers}
+              rows:
+                - {group: Smoker, bills: 93, mean_tip: 3.009, difference: "+0.017"}
+                - {group: Non-smoker, bills: 151, mean_tip: 2.992, difference: "0.000"}
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: markdown
+              text: |
+                A hypothesis test has three pieces:
+
+                1. **Null hypothesis (H₀)** — there is no difference between the groups.
+                2. **Test statistic** — how far the observed difference is from zero,
+                   measured in standard-error units.
+                3. **p-value** — the probability of a difference at least this extreme
+                   *if H₀ were true*.
+
+                A p-value is **not** the probability that H₀ is true, and "not
+                significant" does not mean "no difference". It means the data are
+                compatible with no difference.
+            - type: callout
+              variant: info
+              title: Statistical vs practical significance
+              text: |
+                With a huge sample, a trivial difference can produce a tiny p-value.
+                Always report the size of the effect, not only its significance.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              source: |
+                import pandas as pd
+
+                df = pd.read_csv("/opt/opencs/datasets/tips/v1/tips.csv")
+                print(df.groupby("smoker")["tip"].agg(["count", "mean", "std"]).round(3))
+            - type: output
+              kind: table
+              columns:
+                - {key: smoker, label: smoker}
+                - {key: count, label: count}
+                - {key: mean, label: mean}
+                - {key: std, label: std}
+              rows:
+                - {smoker: "No", count: 151, mean: 2.992, std: 1.376}
+                - {smoker: "Yes", count: 93, mean: 3.009, std: 1.385}
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              caption: Welch's t-test does not assume equal variances.
+              source: |
+                from scipy import stats
+
+                yes = df[df.smoker == "Yes"].tip
+                no = df[df.smoker == "No"].tip
+                result = stats.ttest_ind(yes, no, equal_var=False)
+                print("t =", round(result.statistic, 3))
+                print("p =", round(result.pvalue, 3))
+            - type: output
+              kind: text
+              text: |
+                t = 0.092
+                p = 0.927
+            - type: markdown
+              text: |
+                A p-value of 0.927 means data like these are extremely unsurprising
+                under the null hypothesis. There is no evidence of a difference. That is
+                a valid and useful finding — it argues against spending effort targeting
+                smokers differently.
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: chart
+              title: Tip distribution by smoker status
+              caption: The distributions overlap almost completely; the means are 1.7 cents apart.
+              spec:
+                type: box
+                x: smoker
+                y: tip
+                data:
+                  - {smoker: "No", tip: 1.01}
+                  - {smoker: "No", tip: 1.66}
+                  - {smoker: "No", tip: 3.5}
+                  - {smoker: "No", tip: 3.31}
+                  - {smoker: "No", tip: 3.61}
+                  - {smoker: "No", tip: 4.71}
+                  - {smoker: "No", tip: 2.0}
+                  - {smoker: "Yes", tip: 1.5}
+                  - {smoker: "Yes", tip: 3.0}
+                  - {smoker: "Yes", tip: 2.0}
+                  - {smoker: "Yes", tip: 3.5}
+                  - {smoker: "Yes", tip: 4.0}
+                  - {smoker: "Yes", tip: 1.75}
+                  - {smoker: "Yes", tip: 2.5}
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: "Running many tests until one is significant"
+                  explanation: Multiple comparisons inflate the false-positive rate.
+                  fix: Pre-register the comparison, or correct with Bonferroni/Benjamini–Hochberg.
+                - error: "Interpreting p = 0.04 as a 96% chance the effect is real"
+                  explanation: The p-value is computed under H₀; it is not a posterior probability.
+                  fix: Report the effect size and confidence interval alongside the p-value.
+                - error: "Using a t-test on heavily skewed or tiny groups"
+                  explanation: The normal approximation may not hold.
+                  fix: Use a rank-based test or bootstrap, and inspect the distributions.
+                - error: "Confusing a paired design with an independent design"
+                  explanation: Before/after measurements on the same units are paired.
+                  fix: Use `ttest_rel` and analyse the differences.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The exercise gives you a second comparison in the tips data and asks
+                for a correct test, effect size and a plain-language conclusion.
+            - type: checklist
+              items:
+                - "I can state H₀ and interpret a p-value correctly."
+                - "I report an effect size, not only significance."
+                - "I check group sizes and distributions before choosing a test."
+                - "I avoid multiple-comparison fishing."
+      takeaways:
+        - A p-value measures surprise under the null hypothesis.
+        - Non-significance is not proof of no difference.
+        - Effect size and confidence intervals make results interpretable.
+        - Choosing a test depends on design, distribution and sample size.
+      glossary:
+        - term: Null hypothesis
+          definition: The default claim of no effect or no difference.
+        - term: p-value
+          definition: The probability of data at least as extreme as observed, assuming the null hypothesis.
+        - term: Effect size
+          definition: The magnitude of a difference, independent of sample size.

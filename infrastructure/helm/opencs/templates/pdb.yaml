@@ -1,0 +1,41 @@
+{{/*
+PodDisruptionBudgets.
+
+minAvailable: 1 on 2+ replicas means a single voluntary disruption (node
+drain) can never take the platform fully offline. The chart validation in
+_helpers.tpl refuses replicaCount < 2 when a PDB is enabled, because a PDB of
+minAvailable: 1 over one replica blocks every drain forever.
+*/}}
+{{- if and .Values.backend.enabled .Values.backend.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "opencs.fullname" . }}-backend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "opencs.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  minAvailable: {{ .Values.backend.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "opencs.fullname" . }}-backend
+      app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+{{- if and .Values.frontend.enabled .Values.frontend.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "opencs.fullname" . }}-frontend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "opencs.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  minAvailable: {{ .Values.frontend.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "opencs.fullname" . }}-frontend
+      app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

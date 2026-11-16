@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "dataset_id": "gapminder",
+  "slug": "gapminder",
+  "title": "Gapminder",
+  "category": "Time series",
+  "summary": "Life expectancy, population and GDP per capita by country, 1952–2007.",
+  "description": "Country-year observations every five years with life expectancy, population and GDP per capita, grouped by continent. Used for time comparisons, joins of concepts and multi-series line charts.",
+  "teaching_tags": [
+    "time series",
+    "visualization",
+    "aggregation",
+    "countries"
+  ],
+  "position": 80,
+  "license": "MIT",
+  "license_url": "https://github.com/plotly/datasets/blob/master/LICENSE",
+  "license_status": "verified",
+  "source_url": "https://github.com/plotly/datasets",
+  "attribution": "Gapminder Foundation data, distributed in the plotly/datasets repository.",
+  "notes": "",
+  "generated_at": "2026-11-16T11:11:42.460379+00:00",
+  "generator": "scripts/fetch_datasets.py",
+  "versions": [
+    {
+      "version": 1,
+      "format": "csv",
+      "file": "gapminder.csv",
+      "object_key": "gapminder/v1/gapminder.csv",
+      "relative_mount_path": "gapminder/v1/gapminder.csv",
+      "sha256": "81d88c9bba35b5dda347b1aed29023d48363b9d50b4691dd7b40e938c51dba43",
+      "size_bytes": 85544,
+      "row_count": 1704,
+      "columns": [
+        {
+          "name": "country",
+          "dtype": "object"
+        },
+        {
+          "name": "year",
+          "dtype": "int64"
+        },
+        {
+          "name": "pop",
+          "dtype": "float64"
+        },
+        {
+          "name": "continent",
+          "dtype": "object"
+        },
+        {
+          "name": "life_exp",
+          "dtype": "float64"
+        },
+        {
+          "name": "gdp_per_cap",
+          "dtype": "float64"
+        }
+      ],
+      "preview": [
+        {
+          "country": "Afghanistan",
+          "year": 1952,
+          "pop": 8425333.0,
+          "continent": "Asia",
+          "life_exp": 28.801,
+          "gdp_per_cap": 779.4453145
+        },
+        {
+          "country": "Afghanistan",
+          "year": 1957,
+          "pop": 9240934.0,
+          "continent": "Asia",
+          "life_exp": 30.332,
+          "gdp_per_cap": 820.8530296
+        },
+        {
+          "country": "Afghanistan",
+          "year": 1962,
+          "pop": 10267083.0,
+          "continent": "Asia",
+          "life_exp": 31.997,
+          "gdp_per_cap": 853.10071
+        },
+        {
+          "country": "Afghanistan",
+          "year": 1967,
+          "pop": 11537966.0,
+          "continent": "Asia",
+          "life_exp": 34.02,
+          "gdp_per_cap": 836.1971382
+        },
+        {
+          "country": "Afghanistan",
+          "year": 1972,
+          "pop": 13079460.0,
+          "continent": "Asia",
+          "life_exp": 36.088,
+          "gdp_per_cap": 739.9811058
+        }
+      ],
+      "published_at": "2026-11-16T11:11:42.460370+00:00",
+      "transform": {
+        "rows": 1704,
+        "source_rows": 1704,
+        "sampled": false
+      }
+    }
+  ]
+}

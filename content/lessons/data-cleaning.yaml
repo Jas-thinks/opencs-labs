@@ -1,0 +1,429 @@
+slug: data-cleaning
+title: Data Cleaning
+description: Missing values, duplicates, wrong types and outliers — how to make data trustworthy without inventing it.
+
+lessons:
+  - slug: missing-values
+    title: Missing Values
+    objective: Choose and justify a missing-value strategy per column, and measure the effect of that choice.
+    summary: Work through the Titanic age, cabin and embarkation gaps with drop, median fill and missing-indicator approaches.
+    estimated_minutes: 18
+    datasets: [titanic]
+    exercises: [clean-titanic-missing]
+    notebook_activity:
+      title: A cleaning decision log
+      intro_markdown: |
+        # Missing Values
+
+        A cleaning decision is only defensible if it is written down. In this
+        notebook you will build a small **decision log**: column, missing count,
+        strategy, reason.
+      cells:
+        - source: |
+            import pandas as pd
+
+            df = pd.read_csv("/opt/opencs/datasets/titanic/v1/titanic.csv")
+            missing = df.isna().sum().sort_values(ascending=False)
+            missing[missing > 0]
+        - source: |
+            decisions = pd.DataFrame([
+                {"column": "deck", "missing": 688, "strategy": "drop column", "reason": "77% missing; a fill would invent data"},
+                {"column": "age", "missing": 177, "strategy": "median fill + indicator", "reason": "20% missing; skewed distribution"},
+                {"column": "embarked", "missing": 2, "strategy": "drop rows", "reason": "2 of 891 rows; negligible loss"},
+            ])
+            decisions
+        - cell_type: markdown
+          source: |
+            ## Implement the log
+
+            Apply the decisions to a copy and verify the result.
+        - source: |
+            cleaned = df.drop(columns=["deck"]).copy()
+            cleaned["age_missing"] = cleaned["age"].isna().astype(int)
+            cleaned["age"] = cleaned["age"].fillna(cleaned["age"].median())
+            cleaned = cleaned.dropna(subset=["embarked"])
+            print(cleaned.shape)
+            print(int(cleaned.isna().sum().sum()), "remaining missing values")
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                Missing data is rarely random. On the Titanic, `deck` is missing for
+                most third-class passengers — the blanks encode class. If you fill or
+                drop without noticing that, your model can learn from your cleaning
+                procedure instead of from reality.
+            - type: table
+              caption: Missing counts and percentages in the Titanic table.
+              columns:
+                - {key: column, label: column}
+                - {key: missing, label: missing}
+                - {key: percent, label: percent of rows}
+              rows:
+                - {column: deck, missing: 688, percent: 77.2}
+                - {column: age, missing: 177, percent: 19.9}
+                - {column: embarked, missing: 2, percent: 0.2}
+                - {column: embark_town, missing: 2, percent: 0.2}
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: markdown
+              text: |
+                Three broad strategies, each with a cost:
+
+                1. **Drop rows** — simple, but loses information and can bias the sample.
+                2. **Fill (impute)** — keeps rows, but shrinks variance and can create
+                   false confidence. Median for skewed numbers; mode or a new category
+                   for categoricals.
+                3. **Add a missing indicator** — keeps "was unknown" as a real signal,
+                   which is often the most honest option.
+
+                When missingness is above roughly half the rows, dropping the column is
+                usually better than filling it.
+            - type: callout
+              variant: warning
+              title: Never fill blindly
+              text: |
+                `df.fillna(0)` on `age` claims that 177 passengers were newborns. It is
+                a data fabrication, not a cleaning step.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              source: |
+                import pandas as pd
+
+                df = pd.read_csv("/opt/opencs/datasets/titanic/v1/titanic.csv")
+                print(df.isna().mean().sort_values(ascending=False).head(5).round(3))
+                print("age mean:", round(df.age.mean(), 2), "median:", df.age.median())
+            - type: output
+              kind: text
+              text: |
+                deck           0.772
+                age            0.199
+                embarked       0.002
+                embark_town    0.002
+                survived       0.000
+                dtype: float64
+                age mean: 29.7 median: 28.0
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              caption: Drop, fill and flag — each choice explicit.
+              source: |
+                cleaned = df.drop(columns=["deck"]).copy()
+                cleaned["age_missing"] = cleaned["age"].isna().astype(int)
+                cleaned["age"] = cleaned["age"].fillna(cleaned["age"].median())
+                cleaned = cleaned.dropna(subset=["embarked"])
+                print(cleaned.shape)
+                print(int(cleaned.isna().sum().sum()))
+            - type: output
+              kind: text
+              text: |
+                (889, 15)
+                0
+            - type: markdown
+              text: |
+                The `age_missing` indicator preserves the fact of unknown age even
+                though the value itself is estimated. A model can then learn whether
+                "age was unknown" correlates with survival.
+            - type: code
+              language: python
+              caption: Check whether the fill changed the distribution meaningfully.
+              source: |
+                print("original mean:", round(df.age.mean(), 2))
+                print("filled mean:  ", round(cleaned.age.mean(), 2))
+                print("original std: ", round(df.age.std(), 2))
+                print("filled std:   ", round(cleaned.age.std(), 2))
+            - type: output
+              kind: text
+              text: |
+                original mean: 29.7
+                filled mean:   29.36
+                original std:  14.53
+                filled std:    13.3
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: chart
+              title: Missingness is concentrated in two columns
+              caption: deck is dropped; age is filled with an indicator; the two embarkation rows are dropped.
+              spec:
+                type: bar
+                x: column
+                y: missing
+                data:
+                  - {column: deck, missing: 688}
+                  - {column: age, missing: 177}
+                  - {column: embarked, missing: 2}
+                  - {column: embark_town, missing: 2}
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: "`df.fillna(df.mean())` raises a TypeError"
+                  explanation: You cannot average text columns.
+                  fix: Select numeric columns — `df.select_dtypes("number").fillna(df.select_dtypes("number").mean())`.
+                - error: "`dropna()` removed hundreds of rows"
+                  explanation: The default drops a row if any column is missing.
+                  fix: Use `dropna(subset=[...])` or `how="all"`.
+                - error: "The fill produced an inconsistency with another column"
+                  explanation: You filled age before computing family or title features.
+                  fix: Decide the order of derived features and missing handling explicitly.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The exercise asks you to produce a cleaned Titanic table plus a
+                machine-readable decision log. Automated checks verify both.
+            - type: checklist
+              items:
+                - "I measure missingness before choosing a strategy."
+                - "I justify every fill or drop per column."
+                - "I use median for skewed numeric columns."
+                - "I keep an indicator when missingness itself is informative."
+      takeaways:
+        - Missingness can carry information; measure it before removing it.
+        - Fill values are estimates, not facts — record them.
+        - Drop columns when most of the column is absent.
+        - Verify the effect of cleaning on shape and distribution.
+      glossary:
+        - term: Imputation
+          definition: Replacing missing values with an estimate.
+        - term: Missing indicator
+          definition: A binary column recording whether a value was originally absent.
+        - term: MCAR
+          definition: Missing completely at random — a strong assumption rarely true in practice.
+
+  - slug: duplicates-types-outliers
+    title: Duplicates, Types and Outliers
+    objective: Detect duplicate rows, correct mis-typed columns, and identify outliers without silently deleting them.
+    summary: Use the Palmer penguins table to find duplicated records, fix a numeric column stored as text, and apply the IQR rule.
+    estimated_minutes: 16
+    datasets: [palmer-penguins]
+    exercises: [clean-penguins-types]
+    notebook_activity:
+      title: Type and outlier audit
+      intro_markdown: |
+        # Duplicates, Types, Outliers
+
+        An outlier is not automatically an error. Your job is to investigate,
+        not to delete. This notebook gives you the tools to decide.
+      cells:
+        - source: |
+            import pandas as pd
+
+            df = pd.read_csv("/opt/opencs/datasets/palmer-penguins/v1/penguins.csv")
+            print("duplicates:", int(df.duplicated().sum()))
+            print(df.dtypes)
+        - source: |
+            q1, q3 = df["body_mass_g"].quantile([0.25, 0.75])
+            iqr = q3 - q1
+            lower, upper = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+            print("bounds:", lower, upper)
+            print("outliers:", int(((df.body_mass_g < lower) | (df.body_mass_g > upper)).sum()))
+        - cell_type: markdown
+          source: |
+            ## Compare by species
+
+            Are the "outliers" simply a different species?
+        - source: |
+            df.groupby("species")["body_mass_g"].agg(["count", "mean", "min", "max"]).round(0)
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                The Palmer penguins table has 344 rows. Two measurements are missing
+                for two birds, sex is missing for eleven, and `body_mass_g` ranges from
+                2700 g to 6300 g. The Gentoo penguins are much heavier than the other
+                species — an "outlier" test on the pooled column would flag them.
+            - type: table
+              caption: Body mass by species.
+              columns:
+                - {key: species, label: species}
+                - {key: count, label: count}
+                - {key: mean_g, label: mean (g)}
+                - {key: median_g, label: median (g)}
+                - {key: std_g, label: std (g)}
+              rows:
+                - {species: Adelie, count: 152, mean_g: "3700.7", median_g: "3700.0", std_g: "458.6"}
+                - {species: Chinstrap, count: 68, mean_g: "3733.1", median_g: "3700.0", std_g: "384.3"}
+                - {species: Gentoo, count: 123, mean_g: "5076.0", median_g: "5000.0", std_g: "504.1"}
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: markdown
+              text: |
+                **Duplicates** are repeated records. `duplicated()` compares all columns
+                by default; for a table without a stable ID that is the best you can do.
+                Investigate before removing: two penguins can legitimately share every
+                measurement if the data were rounded.
+
+                **Types** matter because a numeric column read as text cannot be
+                aggregated. Common causes: thousands separators, units in the cell,
+                `"?"` placeholders, locale decimal commas.
+
+                **Outliers** are values far from the rest. The IQR rule flags values
+                below `Q1 - 1.5×IQR` or above `Q3 + 1.5×IQR`. It is a screening tool,
+                not a verdict.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              source: |
+                import pandas as pd
+
+                df = pd.read_csv("/opt/opencs/datasets/palmer-penguins/v1/penguins.csv")
+                print(df.duplicated().sum(), "duplicate rows")
+                print(df.dtypes)
+                print(df.isna().sum().sum(), "missing cells")
+            - type: output
+              kind: text
+              text: |
+                0 duplicate rows
+                species               object
+                island                object
+                bill_length_mm       float64
+                bill_depth_mm        float64
+                flipper_length_mm    float64
+                body_mass_g          float64
+                sex                   object
+                year                   int64
+                dtype: object
+                19 missing cells
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              caption: Correct a text-encoded numeric column.
+              source: |
+                demo = pd.DataFrame({"mass": ["3750", "3800", "4,500", "?"]})
+                demo["mass_clean"] = pd.to_numeric(
+                    demo["mass"].str.replace(",", "", regex=False), errors="coerce"
+                )
+                print(demo)
+                print(demo.dtypes)
+            - type: output
+              kind: table
+              columns:
+                - {key: mass, label: mass}
+                - {key: mass_clean, label: mass_clean}
+              rows:
+                - {mass: "3750", mass_clean: 3750.0}
+                - {mass: "3800", mass_clean: 3800.0}
+                - {mass: "4,500", mass_clean: 4500.0}
+                - {mass: "?", mass_clean: null}
+            - type: code
+              language: python
+              caption: IQR screening on body mass.
+              source: |
+                q1, q3 = df["body_mass_g"].quantile([0.25, 0.75])
+                iqr = q3 - q1
+                lower, upper = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+                flagged = df[(df.body_mass_g < lower) | (df.body_mass_g > upper)]
+                print(round(lower, 1), round(upper, 1), len(flagged))
+                print(flagged["species"].value_counts())
+            - type: output
+              kind: text
+              text: |
+                2625.0 5875.0 0
+                Series([], Name: count, dtype: int64)
+            - type: callout
+              variant: info
+              title: Pooled bounds hide species structure
+              text: |
+                The pooled IQR is wide because the three species differ. Within Gentoo
+                alone, the bounds tighten. Always ask whether the population you are
+                testing is homogeneous.
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: chart
+              title: Body mass distribution by species
+              caption: Gentoo is a separate population, not an error.
+              spec:
+                type: box
+                x: species
+                y: body_mass_g
+                data:
+                  - {species: Adelie, body_mass_g: 3750}
+                  - {species: Adelie, body_mass_g: 3800}
+                  - {species: Adelie, body_mass_g: 3250}
+                  - {species: Adelie, body_mass_g: 3450}
+                  - {species: Adelie, body_mass_g: 4400}
+                  - {species: Chinstrap, body_mass_g: 3800}
+                  - {species: Chinstrap, body_mass_g: 3950}
+                  - {species: Chinstrap, body_mass_g: 3800}
+                  - {species: Chinstrap, body_mass_g: 4150}
+                  - {species: Chinstrap, body_mass_g: 3250}
+                  - {species: Gentoo, body_mass_g: 5000}
+                  - {species: Gentoo, body_mass_g: 5700}
+                  - {species: Gentoo, body_mass_g: 5400}
+                  - {species: Gentoo, body_mass_g: 4800}
+                  - {species: Gentoo, body_mass_g: 6300}
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: "`pd.to_numeric` fails on a column"
+                  explanation: A value contains a comma, unit or placeholder.
+                  fix: Clean the string first and pass `errors="coerce"` so bad values become NaN.
+                - error: "`drop_duplicates()` removed real observations"
+                  explanation: The table has no unique ID and all columns matched by chance.
+                  fix: Keep the row; inspect it manually before deciding.
+                - error: "Outlier removal destroyed a valid subgroup"
+                  explanation: The IQR was computed on a pooled heterogeneous population.
+                  fix: Compute bounds per relevant group, or use domain knowledge.
+                - error: "Comparisons silently fail after reading CSV"
+                  explanation: The column was read as `object` instead of numeric.
+                  fix: Validate dtypes immediately after loading.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The practice exercise gives you a dirty penguins extract. Fix the type,
+                handle missing measurements, and report outliers per species.
+            - type: checklist
+              items:
+                - "I check for duplicates before modelling."
+                - "I verify numeric dtypes after loading."
+                - "I screen outliers with a stated rule."
+                - "I investigate outliers in context before removing anything."
+      takeaways:
+        - Duplicates require judgment, not blind removal.
+        - Text-encoded numbers must be converted explicitly.
+        - Outlier rules are screens, not conclusions.
+        - Heterogeneous groups distort pooled statistics.
+      glossary:
+        - term: IQR
+          definition: Interquartile range, Q3 minus Q1.
+        - term: Coercion
+          definition: Converting a value to another type, turning impossible conversions into NaN.
+        - term: Duplicate record
+          definition: A row identical to another across all compared columns.

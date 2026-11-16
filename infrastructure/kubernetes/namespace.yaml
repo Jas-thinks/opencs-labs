@@ -1,0 +1,40 @@
+# OpenCS Labs -- namespaces
+#
+#   opencs      platform control plane: FastAPI, frontend, PostgreSQL, MinIO,
+#               dataset serving PVC and the dataset sync Job.
+#   opencs-hub  JupyterHub control plane (hub + configurable HTTP proxy) plus
+#               every single-user notebook pod created by KubeSpawner.
+#
+# Splitting the two namespaces keeps the notebook compute plane away from the
+# application control plane: ResourceQuota, NetworkPolicy, LimitRange and
+# Kyverno guardrails can be applied to notebook pods without touching the API.
+#
+# Pod Security Admission:
+#   opencs      enforce=restricted -- every workload we ship sets runAsNonRoot,
+#               seccompProfile=RuntimeDefault, drops ALL capabilities and has no
+#               privilege escalation.
+#   opencs-hub  enforce=baseline  -- the upstream JupyterHub chart's hub/proxy
+#               pods are not guaranteed to satisfy every `restricted` control.
+#               Single-user notebook pods are additionally constrained by
+#               infrastructure/policies/kyverno-notebook-policy.yaml.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/name: opencs
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opencs-hub
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/name: opencs-hub
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

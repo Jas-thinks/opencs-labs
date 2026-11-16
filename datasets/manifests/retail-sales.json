@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "dataset_id": "retail-sales",
+  "slug": "retail-sales",
+  "title": "Online Retail Sales",
+  "category": "Business analytics",
+  "summary": "20,000 real retail invoice lines with products, quantities and countries.",
+  "description": "A deterministic sample of UK online-retail invoices: stock codes, descriptions, quantities, unit prices, customers and countries. Used for business aggregation, revenue analysis and customer grouping.",
+  "teaching_tags": [
+    "groupby",
+    "business analytics",
+    "aggregation",
+    "datetime"
+  ],
+  "position": 100,
+  "license": "CC BY 4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "license_status": "verified",
+  "source_url": "https://archive.ics.uci.edu/dataset/352/online+retail",
+  "attribution": "Daqing Chen et al. (2012), UCI Machine Learning Repository.",
+  "notes": "",
+  "generated_at": "2026-11-16T11:12:06.593946+00:00",
+  "generator": "scripts/fetch_datasets.py",
+  "versions": [
+    {
+      "version": 1,
+      "format": "csv",
+      "file": "online-retail-sample.csv",
+      "object_key": "retail-sales/v1/online-retail-sample.csv",
+      "relative_mount_path": "retail-sales/v1/online-retail-sample.csv",
+      "sha256": "3e389d3f14b4f5b9fddd23ed51a7fd898c8fc83318fdc2723ffb532a60bb34ba",
+      "size_bytes": 1773402,
+      "row_count": 20000,
+      "columns": [
+        {
+          "name": "invoice_no",
+          "dtype": "object"
+        },
+        {
+          "name": "stock_code",
+          "dtype": "object"
+        },
+        {
+          "name": "description",
+          "dtype": "object"
+        },
+        {
+          "name": "quantity",
+          "dtype": "int64"
+        },
+        {
+          "name": "invoice_date",
+          "dtype": "object"
+        },
+        {
+          "name": "unit_price",
+          "dtype": "float64"
+        },
+        {
+          "name": "customer_id",
+          "dtype": "float64"
+        },
+        {
+          "name": "country",
+          "dtype": "object"
+        }
+      ],
+      "preview": [
+        {
+          "invoice_no": 536365,
+          "stock_code": "84406B",
+          "description": "CREAM CUPID HEARTS COAT HANGER",
+          "quantity": 8,
+          "invoice_date": "2010-12-01 08:26:00",
+          "unit_price": 2.75,
+          "customer_id": 17850.0,
+          "country": "United Kingdom"
+        },
+        {
+          "invoice_no": 536370,
+          "stock_code": 10002,
+          "description": "INFLATABLE POLITICAL GLOBE ",
+          "quantity": 48,
+          "invoice_date": "2010-12-01 08:45:00",
+          "unit_price": 0.85,
+          "customer_id": 12583.0,
+          "country": "France"
+        },
+        {
+          "invoice_no": 536373,
+          "stock_code": 37370,
+          "description": "RETRO COFFEE MUGS ASSORTED",
+          "quantity": 6,
+          "invoice_date": "2010-12-01 09:02:00",
+          "unit_price": 1.06,
+          "customer_id": 17850.0,
+          "country": "United Kingdom"
+        },
+        {
+          "invoice_no": 536381,
+          "stock_code": 22083,
+          "description": "PAPER CHAIN KIT RETROSPOT",
+          "quantity": 1,
+          "invoice_date": "2010-12-01 09:41:00",
+          "unit_price": 2.95,
+          "customer_id": 15311.0,
+          "country": "United Kingdom"
+        },
+        {
+          "invoice_no": "C536379",
+          "stock_code": "D",
+          "description": "Discount",
+          "quantity": -1,
+          "invoice_date": "2010-12-01 09:41:00",
+          "unit_price": 27.5,
+          "customer_id": 14527.0,
+          "country": "United Kingdom"
+        }
+      ],
+      "published_at": "2026-11-16T11:12:06.593935+00:00",
+      "transform": {
+        "rows": 20000,
+        "source_rows": 541909,
+        "sampled": true,
+        "sample_method": "pandas DataFrame.sample(n=20000, random_state=42)",
+        "subset": "Online Retail transactions sample"
+      }
+    }
+  ]
+}

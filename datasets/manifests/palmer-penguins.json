@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "dataset_id": "palmer-penguins",
+  "slug": "palmer-penguins",
+  "title": "Palmer Penguins",
+  "category": "Visualization",
+  "summary": "344 penguins from three islands with bill, flipper and mass measurements.",
+  "description": "A modern replacement for Iris with real missing values and three species across three islands. Excellent for distributions, box plots, scatter plots, group comparison and classification.",
+  "teaching_tags": [
+    "visualization",
+    "EDA",
+    "classification",
+    "missing values"
+  ],
+  "position": 50,
+  "license": "CC0 1.0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "license_status": "verified",
+  "source_url": "https://github.com/allisonhorst/palmerpenguins",
+  "attribution": "Horst, Hill & Gorman (2020), palmerpenguins.",
+  "notes": "",
+  "generated_at": "2026-11-16T11:11:40.586631+00:00",
+  "generator": "scripts/fetch_datasets.py",
+  "versions": [
+    {
+      "version": 1,
+      "format": "csv",
+      "file": "penguins.csv",
+      "object_key": "palmer-penguins/v1/penguins.csv",
+      "relative_mount_path": "palmer-penguins/v1/penguins.csv",
+      "sha256": "f2d6493fc64ad958edbabd55eb0fc989af2c5a0458a2c79ccffe7985606feb60",
+      "size_bytes": 16735,
+      "row_count": 344,
+      "columns": [
+        {
+          "name": "species",
+          "dtype": "object"
+        },
+        {
+          "name": "island",
+          "dtype": "object"
+        },
+        {
+          "name": "bill_length_mm",
+          "dtype": "float64"
+        },
+        {
+          "name": "bill_depth_mm",
+          "dtype": "float64"
+        },
+        {
+          "name": "flipper_length_mm",
+          "dtype": "float64"
+        },
+        {
+          "name": "body_mass_g",
+          "dtype": "float64"
+        },
+        {
+          "name": "sex",
+          "dtype": "object"
+        },
+        {
+          "name": "year",
+          "dtype": "int64"
+        }
+      ],
+      "preview": [
+        {
+          "species": "Adelie",
+          "island": "Torgersen",
+          "bill_length_mm": 39.1,
+          "bill_depth_mm": 18.7,
+          "flipper_length_mm": 181.0,
+          "body_mass_g": 3750.0,
+          "sex": "male",
+          "year": 2007
+        },
+        {
+          "species": "Adelie",
+          "island": "Torgersen",
+          "bill_length_mm": 39.5,
+          "bill_depth_mm": 17.4,
+          "flipper_length_mm": 186.0,
+          "body_mass_g": 3800.0,
+          "sex": "female",
+          "year": 2007
+        },
+        {
+          "species": "Adelie",
+          "island": "Torgersen",
+          "bill_length_mm": 40.3,
+          "bill_depth_mm": 18.0,
+          "flipper_length_mm": 195.0,
+          "body_mass_g": 3250.0,
+          "sex": "female",
+          "year": 2007
+        },
+        {
+          "species": "Adelie",
+          "island": "Torgersen",
+          "bill_length_mm": null,
+          "bill_depth_mm": null,
+          "flipper_length_mm": null,
+          "body_mass_g": null,
+          "sex": null,
+          "year": 2007
+        },
+        {
+          "species": "Adelie",
+          "island": "Torgersen",
+          "bill_length_mm": 36.7,
+          "bill_depth_mm": 19.3,
+          "flipper_length_mm": 193.0,
+          "body_mass_g": 3450.0,
+          "sex": "female",
+          "year": 2007
+        }
+      ],
+      "published_at": "2026-11-16T11:11:40.586619+00:00",
+      "transform": {
+        "rows": 344,
+        "source_rows": 344,
+        "sampled": false
+      }
+    }
+  ]
+}

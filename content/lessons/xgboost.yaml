@@ -1,0 +1,256 @@
+slug: xgboost
+title: XGBoost
+description: Gradient boosting — building trees sequentially to correct previous errors, with regularisation.
+
+lessons:
+  - slug: gradient-boosting-with-xgboost
+    title: Gradient Boosting with XGBoost
+    objective: Train an XGBoost classifier, explain boosting versus bagging, and tune the parameters that control overfitting.
+    summary: Boost shallow trees on the Titanic data, compare honestly with logistic regression, and read the learning curve.
+    estimated_minutes: 20
+    datasets: [titanic]
+    exercises: [xgboost-titanic]
+    notebook_activity:
+      title: Boosting Titanic survival
+      intro_markdown: |
+        # XGBoost
+
+        Boosting builds trees one at a time, each correcting the errors of the
+        ensemble so far. Shallow trees, many rounds, and a learning rate that
+        controls how much each tree contributes.
+      cells:
+        - source: |
+            import pandas as pd
+            from sklearn.model_selection import train_test_split
+
+            df = pd.read_csv("/opt/opencs/datasets/titanic/v1/titanic.csv")
+            data = df[["survived", "pclass", "sex", "age", "fare", "sibsp", "parch"]].copy()
+            data["sex"] = (data["sex"] == "female").astype(int)
+            data["age"] = data["age"].fillna(data["age"].median())
+            data["fare"] = data["fare"].fillna(data["fare"].median())
+            X = data.drop(columns="survived")
+            y = data["survived"]
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42, stratify=y)
+        - source: |
+            import xgboost as xgb
+
+            model = xgb.XGBClassifier(
+                n_estimators=200,
+                max_depth=3,
+                learning_rate=0.1,
+                subsample=0.9,
+                colsample_bytree=0.9,
+                eval_metric="logloss",
+                random_state=42,
+            )
+            model.fit(X_train, y_train)
+            print("test accuracy:", round(model.score(X_test, y_test), 3))
+        - cell_type: markdown
+          source: |
+            ## Early stopping
+
+            A validation set can stop boosting when it stops helping.
+        - source: |
+            model2 = xgb.XGBClassifier(
+                n_estimators=1000,
+                max_depth=3,
+                learning_rate=0.05,
+                eval_metric="logloss",
+                early_stopping_rounds=30,
+                random_state=42,
+            )
+            model2.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
+            print("best iteration:", model2.best_iteration)
+            print("test accuracy:", round(model2.score(X_test, y_test), 3))
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                On the Titanic table, a logistic regression with seven features reaches
+                about 0.780 held-out accuracy. XGBoost with shallow boosted trees reaches
+                about the same. That is worth saying plainly: boosting is powerful, but
+                it is not automatically better on a small, noisy table.
+            - type: table
+              caption: Held-out accuracy on the same Titanic split.
+              columns:
+                - {key: model, label: model}
+                - {key: accuracy, label: accuracy}
+                - {key: auc, label: ROC AUC}
+              rows:
+                - {model: Logistic regression, accuracy: 0.780, auc: 0.843}
+                - {model: XGBoost (200 trees, depth 3), accuracy: 0.780, auc: 0.806}
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: steps
+              items:
+                - title: Start with a constant
+                  text: The first prediction is a simple base score.
+                - title: Add a tree
+                  text: Fit a shallow tree to the current errors (gradients).
+                - title: Shrink
+                  text: Add the tree's contribution scaled by the learning rate.
+                - title: Repeat
+                  text: Each new tree corrects what the ensemble still gets wrong.
+            - type: markdown
+              text: |
+                The parameters that matter most:
+
+                * `n_estimators` — how many boosting rounds (trees).
+                * `learning_rate` — how much each tree contributes.
+                * `max_depth` — tree complexity; usually shallow (2–6).
+                * `subsample` — fraction of rows used per tree.
+                * `colsample_bytree` — fraction of features considered per tree.
+                * `reg_lambda` / `reg_alpha` — L2/L1 regularisation on leaf weights.
+            - type: callout
+              variant: warning
+              title: Boosting vs bagging
+              text: |
+                Random forests build trees independently and average them. Boosting
+                builds trees sequentially, each focused on current errors. Boosting is
+                more sensitive to noise and to the number of rounds.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              source: |
+                import pandas as pd
+                print(pd.read_csv("/opt/opencs/datasets/titanic/v1/titanic.csv")["survived"].value_counts())
+            - type: output
+              kind: text
+              text: |
+                survived
+                0    549
+                1    342
+                Name: count, dtype: int64
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              caption: A conservative first XGBoost model.
+              source: |
+                import xgboost as xgb
+                from sklearn.metrics import accuracy_score, roc_auc_score
+
+                model = xgb.XGBClassifier(
+                    n_estimators=200,
+                    max_depth=3,
+                    learning_rate=0.1,
+                    subsample=0.9,
+                    colsample_bytree=0.9,
+                    eval_metric="logloss",
+                    random_state=42,
+                )
+                model.fit(X_train, y_train)
+                proba = model.predict_proba(X_test)[:, 1]
+                print("accuracy:", round(accuracy_score(y_test, model.predict(X_test)), 3))
+                print("roc auc :", round(roc_auc_score(y_test, proba), 3))
+            - type: output
+              kind: text
+              text: |
+                accuracy: 0.78
+                roc auc : 0.806
+            - type: code
+              language: python
+              caption: Early stopping uses a validation set, not the test set.
+              source: |
+                X_tr, X_val, y_tr, y_val = train_test_split(
+                    X_train, y_train, test_size=0.2, random_state=42, stratify=y_train
+                )
+                model2 = xgb.XGBClassifier(
+                    n_estimators=1000,
+                    max_depth=3,
+                    learning_rate=0.05,
+                    eval_metric="logloss",
+                    early_stopping_rounds=30,
+                    random_state=42,
+                )
+                model2.fit(X_tr, y_tr, eval_set=[(X_val, y_val)], verbose=False)
+                print("best iteration:", model2.best_iteration)
+                print("accuracy:", round(accuracy_score(y_test, model2.predict(X_test)), 3))
+            - type: output
+              kind: text
+              text: |
+                best iteration: 168
+                accuracy: 0.767
+            - type: callout
+              variant: info
+              title: Do not early-stop on the test set
+              text: |
+                The example above uses a validation split carved out of training data.
+                Early stopping against the test set would leak test information into
+                model selection.
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: chart
+              title: Validation log-loss during boosting
+              caption: Loss improves quickly, then flattens as additional rounds stop helping.
+              spec:
+                type: line
+                x: round
+                y: logloss
+                data:
+                  - {round: 0, logloss: 0.622}
+                  - {round: 10, logloss: 0.448}
+                  - {round: 20, logloss: 0.406}
+                  - {round: 30, logloss: 0.388}
+                  - {round: 44, logloss: 0.379}
+                  - {round: 60, logloss: 0.370}
+                  - {round: 80, logloss: 0.364}
+                  - {round: 120, logloss: 0.365}
+                  - {round: 160, logloss: 0.365}
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: "Validation loss rises while training loss falls"
+                  explanation: Boosting is fitting noise after the useful signal is captured.
+                  fix: Use early stopping on a validation set or reduce `n_estimators`.
+                - error: "A large learning rate with many trees overfits immediately"
+                  explanation: Each tree contributes too much.
+                  fix: Lower `learning_rate` and increase `n_estimators` together.
+                - error: "Accuracy is no better than logistic regression, so the model is broken"
+                  explanation: Small, noisy tabular data often shows no gain.
+                  fix: Compare several models honestly; choose based on validation metrics and cost.
+                - error: "Categorical text columns raise an error"
+                  explanation: XGBoost needs numeric input unless categorical support is explicitly enabled.
+                  fix: Encode categories deliberately and fit the encoder on training data only.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The exercise asks you to train XGBoost, use early stopping correctly,
+                and write one paragraph explaining why the result did or did not beat
+                the simpler models.
+            - type: checklist
+              items:
+                - "I can explain boosting versus bagging."
+                - "I know what learning rate and tree count trade off."
+                - "I early-stop on a validation split, never the test set."
+                - "I report an honest comparison rather than assuming XGBoost wins."
+      takeaways:
+        - Boosting adds trees sequentially to correct residual error.
+        - Learning rate and tree count are coupled.
+        - Early stopping requires a validation set.
+        - More powerful models do not guarantee better held-out performance.
+      glossary:
+        - term: Boosting
+          definition: Sequential ensembling where each model targets previous errors.
+        - term: Learning rate
+          definition: The shrinkage applied to each tree's contribution.
+        - term: Early stopping
+          definition: Halting training when validation performance stops improving.

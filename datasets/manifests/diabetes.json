@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "dataset_id": "diabetes",
+  "slug": "diabetes",
+  "title": "Diabetes Progression",
+  "category": "Regression",
+  "summary": "442 patients, ten baseline variables and a one-year disease progression target.",
+  "description": "Ten baseline predictors (age, sex, BMI, blood pressure and six serum measurements) with a quantitative measure of disease progression one year later. Used for regression, feature importance and model evaluation.",
+  "teaching_tags": [
+    "regression",
+    "evaluation",
+    "feature importance"
+  ],
+  "position": 60,
+  "license": "BSD-3-Clause (scikit-learn bundled data)",
+  "license_url": "https://scikit-learn.org/stable/datasets/toy_dataset.html#diabetes-dataset",
+  "license_status": "review-required",
+  "source_url": "https://scikit-learn.org/stable/datasets/toy_dataset.html#diabetes-dataset",
+  "attribution": "Bundled with scikit-learn; original data from the diabetes study distributed with the package.",
+  "notes": "Features are already mean-centred and scaled by scikit-learn. Do not re-scale blindly in lessons.",
+  "generated_at": "2026-11-16T11:11:41.126368+00:00",
+  "generator": "scripts/fetch_datasets.py",
+  "versions": [
+    {
+      "version": 1,
+      "format": "csv",
+      "file": "diabetes.csv",
+      "object_key": "diabetes/v1/diabetes.csv",
+      "relative_mount_path": "diabetes/v1/diabetes.csv",
+      "sha256": "37445ec452084294acd1ff6f306cc0dc44e533fb158d790fcdc546be880b6e06",
+      "size_bytes": 95149,
+      "row_count": 442,
+      "columns": [
+        {
+          "name": "age",
+          "dtype": "float64"
+        },
+        {
+          "name": "sex",
+          "dtype": "float64"
+        },
+        {
+          "name": "bmi",
+          "dtype": "float64"
+        },
+        {
+          "name": "bp",
+          "dtype": "float64"
+        },
+        {
+          "name": "s1",
+          "dtype": "float64"
+        },
+        {
+          "name": "s2",
+          "dtype": "float64"
+        },
+        {
+          "name": "s3",
+          "dtype": "float64"
+        },
+        {
+          "name": "s4",
+          "dtype": "float64"
+        },
+        {
+          "name": "s5",
+          "dtype": "float64"
+        },
+        {
+          "name": "s6",
+          "dtype": "float64"
+        },
+        {
+          "name": "disease_progression",
+          "dtype": "float64"
+        }
+      ],
+      "preview": [
+        {
+          "age": 0.038075906433423026,
+          "sex": 0.05068011873981862,
+          "bmi": 0.061696206518683294,
+          "bp": 0.0218723855140367,
+          "s1": -0.04422349842444599,
+          "s2": -0.03482076283769895,
+          "s3": -0.04340084565202491,
+          "s4": -0.002592261998183278,
+          "s5": 0.019907486170462722,
+          "s6": -0.01764612515980379,
+          "disease_progression": 151.0
+        },
+        {
+          "age": -0.0018820165277906047,
+          "sex": -0.044641636506989144,
+          "bmi": -0.051474061238800654,
+          "bp": -0.02632752814785296,
+          "s1": -0.008448724111216851,
+          "s2": -0.019163339748222204,
+          "s3": 0.07441156407875721,
+          "s4": -0.03949338287409329,
+          "s5": -0.0683315470939731,
+          "s6": -0.092204049626824,
+          "disease_progression": 75.0
+        },
+        {
+          "age": 0.08529890629667548,
+          "sex": 0.05068011873981862,
+          "bmi": 0.04445121333659049,
+          "bp": -0.00567042229275739,
+          "s1": -0.04559945128264711,
+          "s2": -0.03419446591411989,
+          "s3": -0.03235593223976409,
+          "s4": -0.002592261998183278,
+          "s5": 0.002861309289833047,
+          "s6": -0.025930338989472702,
+          "disease_progression": 141.0
+        },
+        {
+          "age": -0.0890629393522567,
+          "sex": -0.044641636506989144,
+          "bmi": -0.011595014505211082,
+          "bp": -0.03665608107540074,
+          "s1": 0.01219056876179996,
+          "s2": 0.02499059336410222,
+          "s3": -0.036037570043851025,
+          "s4": 0.03430885887772673,
+          "s5": 0.022687744966501246,
+          "s6": -0.009361911330134878,
+          "disease_progression": 206.0
+        },
+        {
+          "age": 0.005383060374248237,
+          "sex": -0.044641636506989144,
+          "bmi": -0.03638469220446948,
+          "bp": 0.0218723855140367,
+          "s1": 0.003934851612593237,
+          "s2": 0.015596139510416171,
+          "s3": 0.008142083605192267,
+          "s4": -0.002592261998183278,
+          "s5": -0.03198763948805312,
+          "s6": -0.04664087356364498,
+          "disease_progression": 135.0
+        }
+      ],
+      "published_at": "2026-11-16T11:11:41.126359+00:00",
+      "transform": {
+        "rows": 442,
+        "source_rows": 442,
+        "sampled": false,
+        "subset": "scikit-learn bundled dataset; features are pre-scaled"
+      }
+    }
+  ]
+}

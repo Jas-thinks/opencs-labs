@@ -1,0 +1,63 @@
+slug: inspect-titanic-schema
+title: Inspect the Titanic Schema
+topic: Introduction to Data Analysis
+difficulty: Easy
+position: 20
+estimated_minutes: 15
+datasets: [titanic]
+related_lesson: tables-types-missingness
+objective: Read a schema, count missing values and choose a median fill for a skewed column.
+instructions:
+  markdown: |
+    Work with the Titanic passenger table.
+
+    Produce:
+
+    * `n_rows` — number of passengers (891).
+    * `missing_counts` — a pandas Series of missing counts per column, restricted to columns with at least one missing value.
+    * `age_missing` — number of missing ages.
+    * `median_age` — the median age as a float.
+starter_notebook:
+  intro_markdown: |
+    # Inspect the Titanic Schema
+
+    **Objective:** measure missingness and compute a robust fill value.
+
+    Use `df.info()` and `df.isna().sum()` as your first tools.
+  cells:
+    - source: |
+        import pandas as pd
+
+        df = pd.read_csv("/opt/opencs/datasets/titanic/v1/titanic.csv")
+        df.info()
+    - source: |
+        n_rows = None  # TODO
+        missing_counts = None  # TODO: only columns with missing > 0
+        age_missing = None  # TODO
+        median_age = None  # TODO
+        print(n_rows, age_missing, median_age)
+        print(missing_counts)
+hints:
+  - "`len(df)` is the row count."
+  - "`counts = df.isna().sum()` then `counts[counts > 0]`."
+  - "The median of age ignores missing values automatically."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 60
+  tests:
+    - id: rows
+      description: n_rows is 891
+      code: |
+        assert int(n_rows) == 891, f"expected 891, got {n_rows!r}"
+    - id: missing-series
+      description: missing_counts contains the four partially missing columns
+      code: |
+        assert missing_counts is not None, "missing_counts is not defined"
+        assert set(missing_counts.index) == {"deck", "age", "embarked", "embark_town"}, set(missing_counts.index)
+        assert int(missing_counts["age"]) == 177
+        assert int(missing_counts["deck"]) == 688
+    - id: age-stats
+      description: age_missing is 177 and median_age is 28.0
+      code: |
+        assert int(age_missing) == 177, f"expected 177, got {age_missing!r}"
+        assert abs(float(median_age) - 28.0) < 0.01, f"expected 28.0, got {median_age!r}"

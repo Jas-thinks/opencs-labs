@@ -1,0 +1,70 @@
+slug: numpy-array-stats
+title: NumPy Statistics on Iris
+topic: NumPy
+difficulty: Medium
+position: 40
+estimated_minutes: 18
+datasets: [iris]
+related_lesson: numpy-arrays-and-vectorisation
+objective: Compute NumPy reductions, percentiles and a boolean-mask count on a real measurement column.
+instructions:
+  markdown: |
+    Work with `petal_length` from the iris table as a NumPy array.
+
+    Produce:
+
+    * `petal` — a NumPy array of the petal lengths.
+    * `mean_petal`, `std_petal` — mean and population standard deviation (NumPy defaults).
+    * `q75` — the 75th percentile.
+    * `n_over_5` — how many petals are longer than 5 cm.
+    * `z` — the standardised array `(petal - mean) / std`.
+starter_notebook:
+  intro_markdown: |
+    # NumPy Statistics on Iris
+
+    **Objective:** use reductions, percentiles, masks and standardisation.
+
+    You should not need a Python loop at any point.
+  cells:
+    - source: |
+        import pandas as pd
+        import numpy as np
+
+        df = pd.read_csv("/opt/opencs/datasets/iris/v1/iris.csv")
+        petal = df["petal_length"].to_numpy()
+        print(petal.shape, petal.dtype)
+    - source: |
+        mean_petal = None  # TODO
+        std_petal = None   # TODO
+        q75 = None         # TODO: np.percentile
+        print(mean_petal, std_petal, q75)
+    - source: |
+        n_over_5 = None  # TODO: build a boolean mask and sum it
+        z = None         # TODO: standardise
+        print(n_over_5)
+hints:
+  - "`petal.mean()` and `petal.std()` are NumPy reductions."
+  - "`np.percentile(petal, 75)` returns the 75th percentile."
+  - "`(petal > 5)` is a boolean mask; `.sum()` counts True values."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 60
+  tests:
+    - id: array
+      description: petal is a 150-element NumPy array
+      code: |
+        import numpy as np
+        assert isinstance(petal, np.ndarray)
+        assert petal.shape == (150,)
+    - id: reductions
+      description: mean, std and q75 match the real data
+      code: |
+        assert abs(float(mean_petal) - 3.758) < 0.01
+        assert abs(float(std_petal) - 1.765) < 0.01
+        assert abs(float(q75) - 5.1) < 0.01
+    - id: mask-and-standardise
+      description: mask count is 42 and z is centred and scaled
+      code: |
+        assert int(n_over_5) == 42, n_over_5
+        assert abs(float(z.mean())) < 1e-9
+        assert abs(float(z.std()) - 1.0) < 1e-9

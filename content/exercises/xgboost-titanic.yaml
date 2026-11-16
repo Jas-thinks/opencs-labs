@@ -1,0 +1,81 @@
+slug: xgboost-titanic
+title: Train XGBoost with Early Stopping
+topic: XGBoost
+difficulty: Hard
+position: 200
+estimated_minutes: 28
+datasets: [titanic]
+related_lesson: gradient-boosting-with-xgboost
+objective: Train a boosted classifier with a correct early-stopping protocol and compare it honestly.
+instructions:
+  markdown: |
+    Train an XGBoost classifier on the Titanic features.
+
+    Produce:
+
+    * `model` — an `XGBClassifier` with `max_depth=3`, `learning_rate=0.05`, `n_estimators=1000`, `early_stopping_rounds=30`, `eval_metric="logloss"` and `random_state=42`.
+    * `best_iteration` — the selected boosting round.
+    * `accuracy` — test accuracy of the early-stopped model.
+    * `used_validation` — `True` only if you early-stopped on a validation split carved from the training data.
+
+    Do **not** early-stop on the test set.
+starter_notebook:
+  intro_markdown: |
+    # Train XGBoost with Early Stopping
+
+    **Objective:** boost shallow trees and stop at the right time without leaking test data.
+  cells:
+    - source: |
+        import pandas as pd
+        import xgboost as xgb
+        from sklearn.model_selection import train_test_split
+        from sklearn.metrics import accuracy_score
+
+        df = pd.read_csv("/opt/opencs/datasets/titanic/v1/titanic.csv")
+        data = df[["survived", "pclass", "sex", "age", "fare", "sibsp", "parch"]].copy()
+        data["sex"] = (data["sex"] == "female").astype(int)
+        data["age"] = data["age"].fillna(data["age"].median())
+        data["fare"] = data["fare"].fillna(data["fare"].median())
+        X = data.drop(columns="survived")
+        y = data["survived"]
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.25, random_state=42, stratify=y
+        )
+        X_tr, X_val, y_tr, y_val = train_test_split(
+            X_train, y_train, test_size=0.2, random_state=42, stratify=y_train
+        )
+    - source: |
+        model = None  # TODO
+        best_iteration = None  # TODO
+        accuracy = None        # TODO
+        used_validation = False  # TODO: set True only if you used X_val/y_val
+        print(best_iteration, accuracy)
+    - source: |
+        comparison = ""  # TODO: compare with logistic regression (~0.78)
+        print(comparison)
+hints:
+  - "Pass `eval_set=[(X_val, y_val)]` to `fit`."
+  - "`model.best_iteration` is available after fitting with early stopping."
+  - "Score on the untouched test split."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 150
+  tests:
+    - id: fitted
+      description: the model is fitted and produced a best iteration
+      code: |
+        assert model is not None
+        assert int(best_iteration) > 0, best_iteration
+    - id: no-leakage
+      description: early stopping used a validation split
+      code: |
+        assert used_validation is True, "early stopping must use a validation split, not the test set"
+    - id: accuracy
+      description: accuracy is in a plausible range for this small dataset
+      code: |
+        assert 0.72 <= float(accuracy) <= 0.84, accuracy
+    - id: comparison
+      description: the comparison is honest about the result
+      code: |
+        text = str(comparison).lower()
+        assert "logistic" in text or "similar" in text or "no better" in text, comparison

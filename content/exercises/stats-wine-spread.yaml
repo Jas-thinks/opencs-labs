@@ -1,0 +1,63 @@
+slug: stats-wine-spread
+title: Centre and Spread of Wine Alcohol
+topic: Statistics
+difficulty: Medium
+position: 130
+estimated_minutes: 18
+datasets: [wine-quality]
+related_lesson: central-tendency-and-spread
+objective: Quantify centre and spread, and demonstrate the robustness of the median to an extreme value.
+instructions:
+  markdown: |
+    Produce:
+
+    * `alcohol_mean`, `alcohol_median`, `alcohol_std` — for the wine `alcohol` column.
+    * `alcohol_iqr` — the interquartile range.
+    * `demo_mean`, `demo_median` — mean and median of `[9.4, 9.8, 10.2, 10.5, 11.0, 40.0]`.
+    * `original_median` — median of the same list without `40.0`.
+starter_notebook:
+  intro_markdown: |
+    # Centre and Spread of Wine Alcohol
+
+    **Objective:** report centre with spread, and show how an outlier affects each.
+  cells:
+    - source: |
+        import pandas as pd
+        import numpy as np
+
+        wine = pd.read_csv("/opt/opencs/datasets/wine-quality/v1/winequality-red.csv")
+        alcohol = wine["alcohol"]
+    - source: |
+        alcohol_mean = None   # TODO
+        alcohol_median = None # TODO
+        alcohol_std = None    # TODO
+        alcohol_iqr = None    # TODO
+        print(alcohol_mean, alcohol_median, alcohol_std, alcohol_iqr)
+    - source: |
+        values = [9.4, 9.8, 10.2, 10.5, 11.0, 40.0]
+        demo_mean = None      # TODO
+        demo_median = None    # TODO
+        original_median = None  # TODO
+        print(demo_mean, demo_median, original_median)
+hints:
+  - "`Series.quantile(0.75) - Series.quantile(0.25)` is the IQR."
+  - "NumPy's `mean` and `median` work on plain lists."
+  - "Compare how far each statistic moves when 40.0 is included."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 60
+  tests:
+    - id: column-stats
+      description: mean, median, std and IQR are correct
+      code: |
+        assert abs(float(alcohol_mean) - 10.423) < 0.01
+        assert abs(float(alcohol_median) - 10.2) < 0.01
+        assert abs(float(alcohol_std) - 1.066) < 0.01
+        assert abs(float(alcohol_iqr) - 1.6) < 0.01
+    - id: robustness
+      description: the extreme value moves the mean far more than the median
+      code: |
+        assert abs(float(demo_mean) - 15.15) < 0.02
+        assert abs(float(demo_median) - 10.35) < 0.01
+        assert abs(float(original_median) - 10.2) < 0.01
+        assert abs(float(demo_median) - float(original_median)) < abs(float(demo_mean) - 10.18)

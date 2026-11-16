@@ -1,0 +1,428 @@
+slug: trees-and-random-forest
+title: Decision Trees and Random Forest
+description: Recursive splitting, why deep trees overfit, and how bagging turns many trees into a stronger model.
+
+lessons:
+  - slug: decision-trees
+    title: Decision Trees
+    objective: Explain how a tree splits data, control its depth, and recognise the train/test gap caused by overfitting.
+    summary: Classify wines as good or not with trees of increasing depth and watch held-out accuracy stop improving while training accuracy reaches 100%.
+    estimated_minutes: 18
+    datasets: [wine-quality]
+    exercises: [tree-wine]
+    notebook_activity:
+      title: How deep should a tree be?
+      intro_markdown: |
+        # Decision Trees
+
+        A tree asks a sequence of yes/no questions. With unlimited depth it can
+        memorise the training data. This activity measures exactly that.
+      cells:
+        - source: |
+            import pandas as pd
+            from sklearn.model_selection import train_test_split
+            from sklearn.tree import DecisionTreeClassifier
+
+            df = pd.read_csv("/opt/opencs/datasets/wine-quality/v1/winequality-red.csv")
+            df["good"] = (df["quality"] >= 6).astype(int)
+            X = df.drop(columns=["quality", "good"])
+            y = df["good"]
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42, stratify=y)
+        - source: |
+            for depth in [2, 3, 5, None]:
+                tree = DecisionTreeClassifier(max_depth=depth, random_state=42).fit(X_train, y_train)
+                print(depth, "train:", round(tree.score(X_train, y_train), 3), "test:", round(tree.score(X_test, y_test), 3))
+        - cell_type: markdown
+          source: |
+            ## What did it learn?
+
+            Feature importances sum to 1. They describe use inside the tree, not
+            causal importance.
+        - source: |
+            tree = DecisionTreeClassifier(max_depth=3, random_state=42).fit(X_train, y_train)
+            importances = pd.Series(tree.feature_importances_, index=X.columns).sort_values(ascending=False)
+            importances.head(5).round(3)
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                The wine table has a quality score from 3 to 8. For a binary task we
+                define `good = quality ≥ 6`: 855 wines are good and 744 are not. A tree
+                can split these rows using acidity, alcohol, sulphates and the other
+                measurements.
+            - type: table
+              caption: Binary target derived from quality.
+              columns:
+                - {key: class, label: class}
+                - {key: wines, label: wines}
+                - {key: share, label: share}
+              rows:
+                - {class: "good (quality ≥ 6)", wines: 855, share: "53.5%"}
+                - {class: "not good (quality < 6)", wines: 744, share: "46.5%"}
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: steps
+              items:
+                - title: Split
+                  text: Choose a feature and a threshold that best separates the classes — for example `alcohol > 10.4`.
+                - title: Recurse
+                  text: Repeat inside each child, choosing a new split.
+                - title: Stop
+                  text: Stop at a maximum depth, minimum samples per leaf, or when no split helps.
+                - title: Predict
+                  text: A row falls through the splits and reaches a leaf, which carries a class or probability.
+            - type: callout
+              variant: warning
+              title: Trees are unstable
+              text: |
+                A small change in the data can produce a very different tree. That
+                instability is exactly what Random Forest addresses by averaging many
+                trees.
+            - type: markdown
+              text: |
+                Depth is the main complexity control. A depth-2 tree asks at most two
+                questions in sequence; an unlimited tree grows until every training row
+                is isolated.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              source: |
+                import pandas as pd
+
+                df = pd.read_csv("/opt/opencs/datasets/wine-quality/v1/winequality-red.csv")
+                print(df["quality"].value_counts().sort_index())
+                print("good share:", round((df.quality >= 6).mean(), 3))
+            - type: output
+              kind: text
+              text: |
+                quality
+                3      10
+                4      53
+                5     681
+                6     638
+                7     199
+                8      18
+                Name: count, dtype: int64
+                good share: 0.535
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              caption: Depth sweep — the train/test gap is the story.
+              source: |
+                from sklearn.tree import DecisionTreeClassifier
+
+                for depth in [2, 3, 5, None]:
+                    tree = DecisionTreeClassifier(max_depth=depth, random_state=42)
+                    tree.fit(X_train, y_train)
+                    print(
+                        f"max_depth={str(depth):>4}  "
+                        f"train={tree.score(X_train, y_train):.3f}  "
+                        f"test={tree.score(X_test, y_test):.3f}"
+                    )
+            - type: output
+              kind: text
+              text: |
+                max_depth=   2  train=0.697  test=0.718
+                max_depth=   3  train=0.740  test=0.733
+                max_depth=   5  train=0.796  test=0.738
+                max_depth=None  train=1.000  test=0.735
+            - type: markdown
+              text: |
+                The unlimited tree reaches 100% training accuracy because it can isolate
+                every training row. Held-out accuracy does not improve — it slightly
+                worsens. The extra splits model noise, not signal.
+            - type: code
+              language: python
+              caption: Feature importance from a depth-3 tree.
+              source: |
+                tree = DecisionTreeClassifier(max_depth=3, random_state=42).fit(X_train, y_train)
+                importances = pd.Series(tree.feature_importances_, index=X.columns)
+                print(importances.sort_values(ascending=False).head(5).round(3))
+            - type: output
+              kind: text
+              text: |
+                alcohol                 0.596
+                volatile_acidity        0.169
+                sulphates               0.146
+                total_sulfur_dioxide    0.089
+                residual_sugar          0.000
+                dtype: float64
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: chart
+              title: Training versus held-out accuracy by depth
+              caption: Training accuracy keeps rising; held-out accuracy plateaus around 0.73.
+              spec:
+                type: line
+                x: depth
+                y: accuracy
+                series: split
+                data:
+                  - {depth: 2, accuracy: 0.697, split: train}
+                  - {depth: 3, accuracy: 0.740, split: train}
+                  - {depth: 5, accuracy: 0.796, split: train}
+                  - {depth: 8, accuracy: 1.0, split: train}
+                  - {depth: 2, accuracy: 0.718, split: test}
+                  - {depth: 3, accuracy: 0.733, split: test}
+                  - {depth: 5, accuracy: 0.738, split: test}
+                  - {depth: 8, accuracy: 0.735, split: test}
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: "The tree is huge and unreadable"
+                  explanation: No depth or leaf-size limit was set.
+                  fix: Set `max_depth`, `min_samples_leaf`, or use cost-complexity pruning.
+                - error: "Feature importance is treated as causation"
+                  explanation: Importance reflects splits in this model on this data, including correlated features.
+                  fix: Describe it as model behaviour; validate with permutation importance or domain knowledge.
+                - error: "Training accuracy is 1.0 and test accuracy is terrible"
+                  explanation: Classic overfitting.
+                  fix: Reduce depth, increase minimum leaf size, gather more data.
+                - error: "A categorical feature with many levels dominates"
+                  explanation: High-cardinality splits can overfit.
+                  fix: Encode deliberately, group rare levels, or use a model robust to it.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The exercise asks you to find a depth that generalises, report the
+                train/test gap, and name the two most used features.
+            - type: checklist
+              items:
+                - "I can explain what a split does."
+                - "I can control complexity with max_depth."
+                - "I can recognise overfitting from the train/test gap."
+                - "I interpret feature importance cautiously."
+      takeaways:
+        - A decision tree asks sequential threshold questions.
+        - Depth controls complexity; deeper is not better.
+        - A widening train/test gap is overfitting.
+        - Trees are unstable, which motivates ensembles.
+      glossary:
+        - term: Split
+          definition: A yes/no threshold on one feature that partitions rows.
+        - term: Leaf
+          definition: A terminal node that produces a prediction.
+        - term: Pruning
+          definition: Reducing tree complexity after or during growth.
+        - term: Feature importance
+          definition: A measure of how much a feature contributed to splits.
+
+  - slug: random-forests
+    title: Random Forests
+    objective: Explain bagging and feature randomness, then compare a forest with a single tree on held-out data.
+    summary: Build a 200-tree forest on the wine table, read its feature importances, and explain why averaging reduces variance.
+    estimated_minutes: 16
+    datasets: [wine-quality]
+    exercises: [forest-wine]
+    notebook_activity:
+      title: From one tree to a forest
+      intro_markdown: |
+        # Random Forests
+
+        A forest averages many decorrelated trees. You will measure the gain over
+        a single tree and inspect which features the forest actually uses.
+      cells:
+        - source: |
+            import pandas as pd
+            from sklearn.model_selection import train_test_split
+            from sklearn.ensemble import RandomForestClassifier
+
+            df = pd.read_csv("/opt/opencs/datasets/wine-quality/v1/winequality-red.csv")
+            df["good"] = (df["quality"] >= 6).astype(int)
+            X = df.drop(columns=["quality", "good"])
+            y = df["good"]
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42, stratify=y)
+            forest = RandomForestClassifier(n_estimators=200, random_state=42).fit(X_train, y_train)
+            print("train:", round(forest.score(X_train, y_train), 3))
+            print("test :", round(forest.score(X_test, y_test), 3))
+        - source: |
+            importances = pd.Series(forest.feature_importances_, index=X.columns).sort_values(ascending=False)
+            importances.head(6).round(3)
+        - cell_type: markdown
+          source: |
+            ## Tune tree count
+
+            More trees reduce variance, but with diminishing returns and rising cost.
+        - source: |
+            for n in [10, 50, 200]:
+                m = RandomForestClassifier(n_estimators=n, random_state=42).fit(X_train, y_train)
+                print(n, "trees -> test accuracy", round(m.score(X_test, y_test), 3))
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                A single tree on the wine table reaches about 0.735 held-out accuracy.
+                A forest of 200 trees reaches about 0.782 on the same split. The
+                improvement comes from averaging many different trees, not from any
+                individual tree being smarter.
+            - type: table
+              caption: Single tree versus forest on the same split.
+              columns:
+                - {key: model, label: model}
+                - {key: train_acc, label: train accuracy}
+                - {key: test_acc, label: test accuracy}
+              rows:
+                - {model: Decision tree (unlimited), train_acc: 1.000, test_acc: 0.735}
+                - {model: Random forest (200 trees), train_acc: 1.000, test_acc: 0.782}
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: steps
+              items:
+                - title: Bootstrap
+                  text: Each tree is trained on a random sample with replacement from the training rows.
+                - title: Feature randomness
+                  text: At each split, only a random subset of features is considered.
+                - title: Grow
+                  text: Trees grow deep, individually overfitting in different ways.
+                - title: Average
+                  text: Classification uses a vote; regression averages predictions. Errors that differ cancel out.
+            - type: callout
+              variant: info
+              title: Two sources of randomness
+              text: |
+                Bagging (row sampling) and feature subsampling decorrelate the trees.
+                Without feature randomness, every tree would pick the same dominant
+                feature first and the ensemble would gain much less.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              source: |
+                import pandas as pd
+
+                df = pd.read_csv("/opt/opencs/datasets/wine-quality/v1/winequality-red.csv")
+                print(df.shape)
+                print("good share:", round((df.quality >= 6).mean(), 3))
+            - type: output
+              kind: text
+              text: |
+                (1599, 12)
+                good share: 0.535
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              caption: Fit the forest and evaluate honestly.
+              source: |
+                from sklearn.ensemble import RandomForestClassifier
+
+                forest = RandomForestClassifier(n_estimators=200, random_state=42)
+                forest.fit(X_train, y_train)
+                print("train:", round(forest.score(X_train, y_train), 3))
+                print("test :", round(forest.score(X_test, y_test), 3))
+            - type: output
+              kind: text
+              text: |
+                train: 1.0
+                test : 0.782
+            - type: markdown
+              text: |
+                A random forest also reaches 100% training accuracy — each tree is deep.
+                The difference is that averaging decorrelated overfits generalises
+                better than any single one.
+            - type: code
+              language: python
+              caption: Which features does the forest rely on?
+              source: |
+                importances = pd.Series(forest.feature_importances_, index=X.columns)
+                print(importances.sort_values(ascending=False).head(6).round(3))
+            - type: output
+              kind: text
+              text: |
+                alcohol                 0.178
+                sulphates               0.136
+                volatile_acidity        0.107
+                total_sulfur_dioxide    0.105
+                density                 0.087
+                chlorides               0.081
+                dtype: float64
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: chart
+              title: Random forest feature importance
+              caption: Importance is spread across several correlated chemistry measures.
+              spec:
+                type: bar
+                x: feature
+                y: importance
+                data:
+                  - {feature: alcohol, importance: 0.178}
+                  - {feature: sulphates, importance: 0.136}
+                  - {feature: volatile_acidity, importance: 0.107}
+                  - {feature: total_sulfur_dioxide, importance: 0.105}
+                  - {feature: density, importance: 0.087}
+                  - {feature: chlorides, importance: 0.081}
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: "The forest is much better on training data"
+                  explanation: Deep trees memorise; averaging reduces but does not eliminate the gap.
+                  fix: Judge on held-out data; tune `max_depth`, `min_samples_leaf`, `max_features`.
+                - error: "Adding trees keeps improving test accuracy indefinitely"
+                  explanation: Returns diminish; small fluctuations are noise.
+                  fix: Plot accuracy against tree count; stop when it plateaus.
+                - error: "Feature importance is read as a causal ranking"
+                  explanation: Correlated features split importance arbitrarily between them.
+                  fix: Use permutation importance and domain reasoning; never claim causation from it.
+                - error: "The model is slow and memory-hungry"
+                  explanation: Hundreds of deep trees are expensive.
+                  fix: Limit depth, reduce trees, or use `n_jobs` and histogram-based alternatives.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The exercise asks you to compare a single tree and a forest, choose a
+                tree count with evidence, and explain the variance reduction.
+            - type: checklist
+              items:
+                - "I can explain bagging and feature randomness."
+                - "I compare models only on held-out data."
+                - "I can read and caveat feature importance."
+                - "I tune the number of trees with evidence."
+      takeaways:
+        - Random forests average many decorrelated trees.
+        - Bagging and feature subsampling provide the decorrelation.
+        - Forests generalise better than a single deep tree but remain interpretable only approximately.
+        - Tree count has diminishing returns.
+      glossary:
+        - term: Bagging
+          definition: Bootstrap aggregating — training models on resampled data and averaging.
+        - term: Ensemble
+          definition: A model composed of multiple base models.
+        - term: Variance reduction
+          definition: Lowering sensitivity to the particular training sample by averaging.

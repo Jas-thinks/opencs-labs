@@ -1,0 +1,71 @@
+slug: classification-titanic
+title: Logistic Regression for Survival
+topic: Regression and Classification
+difficulty: Medium
+position: 170
+estimated_minutes: 22
+datasets: [titanic]
+related_lesson: logistic-regression
+objective: Train a probabilistic classifier, inspect probabilities and apply a custom threshold.
+instructions:
+  markdown: |
+    Using the prepared Titanic features, fit a logistic regression.
+
+    Produce:
+
+    * `model` — fitted on the training split.
+    * `accuracy` — test accuracy.
+    * `probas` — predicted survival probabilities for the test set.
+    * `n_at_03` — number of test passengers predicted positive at threshold 0.3.
+starter_notebook:
+  intro_markdown: |
+    # Logistic Regression for Survival
+
+    **Objective:** distinguish probabilities from classes and change the threshold deliberately.
+  cells:
+    - source: |
+        import pandas as pd
+        from sklearn.model_selection import train_test_split
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.metrics import accuracy_score
+
+        df = pd.read_csv("/opt/opencs/datasets/titanic/v1/titanic.csv")
+        data = df[["survived", "pclass", "sex", "age", "fare", "sibsp", "parch"]].copy()
+        data["sex"] = (data["sex"] == "female").astype(int)
+        data["age"] = data["age"].fillna(data["age"].median())
+        data["fare"] = data["fare"].fillna(data["fare"].median())
+        X = data.drop(columns="survived")
+        y = data["survived"]
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.25, random_state=42, stratify=y
+        )
+    - source: |
+        model = None  # TODO
+        probas = None # TODO: predict_proba on X_test, positive class
+        print(probas)
+    - source: |
+        accuracy = None  # TODO
+        n_at_03 = None   # TODO: count probas >= 0.3
+        print(accuracy, n_at_03)
+hints:
+  - "`model.predict_proba(X_test)[:, 1]` selects the positive-class probability."
+  - "`accuracy_score(y_test, model.predict(X_test))`."
+  - "A threshold is a comparison, not a model method: `(probas >= 0.3).sum()`."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 90
+  tests:
+    - id: probabilities
+      description: probabilities cover the whole test set and are in [0, 1]
+      code: |
+        assert probas is not None
+        assert len(probas) == 223, len(probas)
+        assert float(min(probas)) >= 0 and float(max(probas)) <= 1
+    - id: accuracy
+      description: test accuracy is about 0.78
+      code: |
+        assert abs(float(accuracy) - 0.78) < 0.02, accuracy
+    - id: threshold
+      description: exactly 109 passengers are predicted positive at 0.3
+      code: |
+        assert int(n_at_03) == 109, n_at_03

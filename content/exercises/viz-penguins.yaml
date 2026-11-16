@@ -1,0 +1,64 @@
+slug: viz-penguins
+title: Choose Charts for Penguin Questions
+topic: Data Visualization
+difficulty: Medium
+position: 120
+estimated_minutes: 20
+datasets: [palmer-penguins]
+related_lesson: choosing-the-right-chart
+objective: Match three analysis questions to appropriate chart types and produce the underlying summaries.
+instructions:
+  markdown: |
+    Work with the Palmer penguins table.
+
+    Produce:
+
+    * `species_means` — mean `body_mass_g` per species (for a comparison chart).
+    * `scatter_data` — a DataFrame with non-missing `bill_length_mm` and `bill_depth_mm` plus `species`.
+    * `chart_plan` — a dict with exactly these keys:
+      * `"comparison"` → `"bar"`
+      * `"distribution"` → `"histogram"`
+      * `"relationship"` → `"scatter"`
+    * `axis_note` — one sentence explaining why a bar chart of means should start at zero.
+starter_notebook:
+  intro_markdown: |
+    # Choose Charts for Penguin Questions
+
+    **Objective:** select the chart from the question, not from habit.
+  cells:
+    - source: |
+        import pandas as pd
+
+        df = pd.read_csv("/opt/opencs/datasets/palmer-penguins/v1/penguins.csv")
+        df.head()
+    - source: |
+        species_means = None  # TODO
+        scatter_data = None   # TODO
+        print(species_means)
+    - source: |
+        chart_plan = None  # TODO: dict with comparison/distribution/relationship
+        axis_note = ""     # TODO: one sentence
+        print(chart_plan)
+hints:
+  - "A comparison of a summary across groups is a bar chart."
+  - "A single numeric distribution is shown with a histogram."
+  - "Two numeric variables are shown with a scatter plot; drop missing pairs first."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 60
+  tests:
+    - id: species-means
+      description: species means are correct
+      code: |
+        assert abs(float(species_means.loc["Gentoo"]) - 5076.0) < 1.0
+        assert abs(float(species_means.loc["Adelie"]) - 3700.7) < 1.0
+    - id: scatter
+      description: scatter_data has 342 complete pairs
+      code: |
+        assert {"bill_length_mm", "bill_depth_mm", "species"}.issubset(scatter_data.columns)
+        assert len(scatter_data) == 342, len(scatter_data)
+    - id: chart-plan
+      description: chart_plan maps each question to the right chart
+      code: |
+        assert chart_plan == {"comparison": "bar", "distribution": "histogram", "relationship": "scatter"}, chart_plan
+        assert "zero" in str(axis_note).lower()

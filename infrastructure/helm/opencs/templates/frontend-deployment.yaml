@@ -1,0 +1,136 @@
+{{- /*
+Static React build served by nginx. The browser talks to one origin: nginx
+serves the SPA bundle and the Ingress routes /api, /hub and /user elsewhere.
+VITE_API_BASE is baked in at build time as `/api/v1`.
+*/ -}}
+{{- $component := printf "%s-frontend" (include "opencs.fullname" .) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $component }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "opencs.componentLabels" (dict "root" . "component" $component) | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  replicas: {{ .Values.frontend.replicaCount }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "opencs.componentSelectorLabels" (dict "root" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "opencs.componentLabels" (dict "root" . "component" $component) | nindent 8 }}
+        app.kubernetes.io/component: web
+      annotations:
+        # Static assets: config changes require an image rebuild, so this is
+        # informational only (which API base the bundle was compiled against).
+        opencs.example.edu/api-base: {{ .Values.frontend.build.viteApiBase | quote }}
+        {{- with .Values.frontend.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        # See infrastructure/kubernetes/frontend.yaml for the full rationale: uid
+        # 1000 cannot bind port 80 without CAP_NET_BIND_SERVICE, so the
+        # unprivileged-port sysctl is relaxed rather than granting the container
+        # a capability or running nginx as root.
+        runAsNonRoot: {{ .Values.frontend.securityContext.runAsNonRoot }}
+        runAsUser: {{ .Values.frontend.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.frontend.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.frontend.securityContext.fsGroup }}
+        seccompProfile:
+          type: RuntimeDefault
+        sysctls:
+          - name: net.ipv4.ip_unprivileged_port_start
+            value: "0"
+      terminationGracePeriodSeconds: 20
+      {{- with .Values.frontend.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- range . }}
+        - maxSkew: {{ .maxSkew }}
+          topologyKey: {{ .topologyKey }}
+          whenUnsatisfiable: {{ .whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              {{- include "opencs.componentSelectorLabels" (dict "root" $ "component" $component) | nindent 14 }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.frontend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.frontend.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.frontend.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: frontend
+          image: {{ include "opencs.image" (dict "image" .Values.frontend.image "root" .) }}
+          imagePullPolicy: {{ include "opencs.imagePullPolicy" (dict "image" .Values.frontend.image "root" .) }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.frontend.service.targetPort }}
+              protocol: TCP
+          env:
+            # Served as a static bundle; these are informational so that
+            # `kubectl describe` shows the API path the build was made for.
+            - name: VITE_API_BASE
+              value: {{ .Values.frontend.build.viteApiBase | quote }}
+            - name: OPENCS_PUBLIC_ORIGIN
+              value: {{ .Values.global.origin | quote }}
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}
+          # Static assets: a 200 on `/` proves nginx is serving the SPA shell.
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.frontend.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.frontend.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.frontend.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.frontend.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.frontend.probes.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.frontend.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.frontend.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.frontend.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.frontend.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.frontend.probes.readiness.failureThreshold }}
+          securityContext:
+            allowPrivilegeEscalation: {{ .Values.frontend.securityContext.allowPrivilegeEscalation }}
+            readOnlyRootFilesystem: {{ .Values.frontend.securityContext.readOnlyRootFilesystem }}
+            capabilities:
+              drop:
+                {{- toYaml .Values.frontend.securityContext.capabilities.drop | nindent 16 }}
+          volumeMounts:
+            # nginx writes its pid file and proxy temp buffers below these
+            # paths; readOnlyRootFilesystem requires them to be writable mounts.
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

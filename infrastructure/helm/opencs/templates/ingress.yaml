@@ -1,0 +1,97 @@
+{{- if .Values.ingress.enabled -}}
+{{- $backendName := printf "%s-backend" (include "opencs.fullname" .) -}}
+{{- $frontendName := printf "%s-frontend" (include "opencs.fullname" .) -}}
+{{- /*
+Single browser origin for app + API + JupyterHub:
+
+  /      -> frontend   (React bundle on nginx)
+  /api   -> backend    (FastAPI, /api/v1/...)
+  /hub   -> JupyterHub proxy (control plane)
+  /user  -> JupyterHub proxy (single-user servers)
+
+Cross-namespace note: an Ingress can only reference Services in its own
+namespace, and the JupyterHub proxy (`proxy-public`) lives in
+global.hubNamespace. When ingress.hubProxyAlias.enabled is true this template
+also renders an ExternalName Service alias in the release namespace.
+*/ -}}
+{{- if .Values.ingress.hubProxyAlias.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.ingress.hubProxyAlias.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "opencs.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alias
+  annotations:
+    opencs.example.edu/note: >-
+      ExternalName alias for the JupyterHub proxy so the opencs Ingress can
+      route /hub and /user to it. ExternalName Services carry no ports; the
+      Ingress supplies the port.
+spec:
+  type: ExternalName
+  externalName: {{ .Values.ingress.hubProxyAlias.externalName | quote }}
+---
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "opencs.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "opencs.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ingress
+  annotations:
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- /* WebSocket support. Modern ingress-nginx forwards Upgrade/Connection
+           for HTTP/1.1 upstreams, but it only negotiates HTTP/1.1 when told
+           to, and the snippet re-asserts the headers so behaviour does not
+           depend on controller version defaults. Requires
+           `allow-snippet-annotations: "true"` on the controller ConfigMap. */}}
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection $connection_upgrade;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_set_header X-Forwarded-Host $host;
+      proxy_buffering off;
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.ingress.paths.api.path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $backendName }}
+                port:
+                  number: {{ .Values.backend.service.port }}
+          {{- range .Values.ingress.paths.hub.paths }}
+          - path: {{ . }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $.Values.ingress.hubProxyAlias.name }}
+                port:
+                  number: {{ $.Values.ingress.hubProxyAlias.port }}
+          {{- end }}
+          - path: {{ .Values.ingress.paths.frontend.path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $frontendName }}
+                port:
+                  number: {{ .Values.frontend.service.port }}
+{{- end }}

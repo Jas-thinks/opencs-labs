@@ -1,0 +1,79 @@
+slug: explore-tips-dataset
+title: Explore the Tips Dataset
+topic: Introduction to Data Analysis
+difficulty: Easy
+position: 10
+estimated_minutes: 15
+datasets: [tips]
+related_lesson: what-is-data-analysis
+objective: Load a CSV, inspect its shape, and compute a grouped average that answers a concrete question.
+instructions:
+  markdown: |
+    Load the tips dataset and answer: **which day has the highest average bill?**
+
+    Produce these variables exactly as named:
+
+    * `n_bills` — the number of rows in the dataset.
+    * `by_day` — a pandas Series of mean `total_bill` indexed by `day`.
+    * `busiest_day` — the day with the highest average bill, as a string.
+
+    The hidden checks compare your values with the real dataset.
+starter_notebook:
+  intro_markdown: |
+    # Explore the Tips Dataset
+
+    **Objective:** load a real table, inspect it, and answer one question with a
+    grouped average.
+
+    Complete the marked cells, then click **Evaluate** in OpenCS.
+  cells:
+    - source: |
+        import pandas as pd
+
+        df = pd.read_csv("/opt/opencs/datasets/tips/v1/tips.csv")
+        df.head()
+    - cell_type: markdown
+      source: |
+        ## 1. How many bills are there?
+    - source: |
+        n_bills = None  # TODO: use df.shape or len(df)
+        print(n_bills)
+    - cell_type: markdown
+      source: |
+        ## 2. Average bill per day
+
+        Assign a Series indexed by `day` to `by_day`.
+    - source: |
+        by_day = None  # TODO: group by day and take the mean of total_bill
+        print(by_day)
+    - cell_type: markdown
+      source: |
+        ## 3. Which day is highest?
+
+        Assign a string such as `"Sat"` to `busiest_day`.
+    - source: |
+        busiest_day = None  # TODO: use idxmax on by_day
+        print(busiest_day)
+hints:
+  - "`df.shape` returns a tuple `(rows, columns)`; the first element is the row count."
+  - "`df.groupby(\"day\")[\"total_bill\"].mean()` gives one value per day."
+  - "`series.idxmax()` returns the index label of the largest value."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 60
+  tests:
+    - id: row-count
+      description: n_bills is the real row count (244)
+      code: |
+        assert "n_bills" in globals(), "n_bills is not defined"
+        assert int(n_bills) == 244, f"expected 244 rows, got {n_bills!r}"
+    - id: grouped-mean
+      description: by_day contains four days with the correct Sunday mean
+      code: |
+        assert "by_day" in globals() and by_day is not None, "by_day is not defined"
+        assert len(by_day) == 4, f"expected 4 days, got {len(by_day)}"
+        assert abs(float(by_day.loc["Sun"]) - 21.41) < 0.01, f"Sunday mean is {by_day.loc['Sun']!r}"
+    - id: busiest-day
+      description: busiest_day identifies Sunday
+      code: |
+        assert str(busiest_day) == "Sun", f"expected 'Sun', got {busiest_day!r}"

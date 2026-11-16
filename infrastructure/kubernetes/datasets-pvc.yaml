@@ -1,0 +1,323 @@
+# OpenCS Labs -- read-only dataset serving tree.
+#
+# ## Lifecycle
+#   datasets/ (repo)  --scripts/fetch_datasets.py-->  raw + manifests
+#                     --scripts/sync_datasets.py-->   MinIO bucket opencs-datasets
+#                     --this Job-->                    /opt/opencs/datasets on the PVC
+#   The PVC is then mounted READ-ONLY into every single-user notebook pod at
+#   /opt/opencs/datasets (see OPENCE_DATASET_MOUNT_PATH and the KubeSpawner
+#   `volumes`/`volumeMounts` configuration for the hub).
+#
+# ## Access mode trade-off
+#   ReadWriteMany is used here: exactly one writer (the datasets-sync Job and
+#   occasional admin re-syncs) and up to 450 concurrent readers (notebook pods
+#   on many nodes). This is the only mode that lets a single sync write once and
+#   have every node read the same bytes without copying.
+#
+#     * ReadWriteMany requires a shared-filesystem StorageClass (NFS, EFS-style
+#       CSI, CephFS, Longhorn RWX). See storage/storageclass-rwx.yaml. These
+#       drivers add latency and a single point of failure at the storage
+#       server, and RWX does not give you POSIX locking guarantees you can rely
+#       on -- fine for an append-free, read-only tree, which is exactly our case.
+#     * ReadOnlyMany looks attractive on paper but is deprecated in the
+#       PersistentVolume API and is not supported by most modern CSI drivers;
+#       do not rely on it. If your cluster only offers ReadWriteOnce, then use
+#       an initContainer or a per-node hostPath cache seeded from MinIO instead
+#       of this PVC (documented in storage/README.md).
+#     * ReadWriteOnce is per-node at best. Mounting a RWO volume into pods on
+#       different nodes is not portable, so it cannot back 400 concurrent
+#       notebook pods.
+#
+#   Nothing ever writes to this volume from a notebook pod: pods mount it with
+#   `readOnly: true`, and the Kyverno policy in policies/ enforces that the only
+#   permitted hostPath/PVC dataset source is `opencs-datasets`.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: opencs-datasets
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/name: opencs-datasets
+    app.kubernetes.io/component: dataset-serving
+  annotations:
+    # Injected into notebook pods, which are created in opencs-hub. A PVC is
+    # namespace-scoped, so the hub must either live in `opencs` or receive a
+    # PV/PVC pair as described in storage/README.md.
+    opencs.example.edu/purpose: "read-only dataset serving tree"
+spec:
+  accessModes:
+    - ReadWriteMany
+  # Use the shared-filesystem class from storage/storageclass-rwx.yaml. Change
+  # this to your cluster's RWX class name. Omitting it would fall back to the
+  # cluster default (usually RWO) and silently break multi-node notebook pods.
+  storageClassName: opencs-rwx
+  resources:
+    requests:
+      storage: 50Gi
+---
+# Materialises the serving tree on the PVC.
+#
+# Two stages, so a partial MinIO state can never be mounted as "the datasets":
+#   1. upload  -- push datasets/serving + manifests into MinIO (source of truth)
+#   2. materialise -- pull the published objects back down onto the PVC, which
+#      guarantees the mounted tree is exactly what the catalogue advertises and
+#      that every file matches its recorded sha256.
+# Both stages are idempotent; re-running the Job is safe and is the documented
+# way to publish a new dataset version.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: datasets-sync
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/name: datasets-sync
+    app.kubernetes.io/component: dataset-serving
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: opencs
+        app.kubernetes.io/name: datasets-sync
+        app.kubernetes.io/component: dataset-serving
+    spec:
+      restartPolicy: OnFailure
+      # A re-sync replaces files in place; never let two of them overlap.
+      activeDeadlineSeconds: 3600
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        # The serving tree must be readable by the notebook pods' uid/gid 1000.
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Wait for MinIO and PostgreSQL to answer before touching any data, so
+        # the Job does not fail-loop while dependencies are still starting.
+        - name: wait-for-dependencies
+          image: opencs/backend:1.0.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              python - <<'PY'
+              import os, socket, time
+              targets = [
+                  (os.environ["MINIO_HOST"], int(os.environ["MINIO_PORT"])),
+                  (os.environ["POSTGRES_HOST"], int(os.environ["POSTGRES_PORT"])),
+              ]
+              deadline = time.time() + 300
+              for host, port in targets:
+                  while True:
+                      try:
+                          with socket.create_connection((host, port), timeout=5):
+                              print(f"{host}:{port} reachable", flush=True)
+                              break
+                      except OSError:
+                          if time.time() > deadline:
+                              raise SystemExit(f"timed out waiting for {host}:{port}")
+                          print(f"waiting for {host}:{port}", flush=True)
+                          time.sleep(5)
+              PY
+          env:
+            - name: MINIO_HOST
+              value: minio.opencs.svc.cluster.local
+            - name: MINIO_PORT
+              value: "9000"
+            - name: POSTGRES_HOST
+              value: postgres.opencs.svc.cluster.local
+            - name: POSTGRES_PORT
+              value: "5432"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: sync
+          image: opencs/backend:1.0.0
+          imagePullPolicy: IfNotPresent
+          workingDir: /app
+          # DATASETS_SYNC_MODE selects which half of the lifecycle this run does:
+          #   all          (default) upload the tree to MinIO, then materialise
+          #                it onto the PVC and verify every sha256
+          #   upload       only publish to MinIO (use from CI or a workstation
+          #                that has datasets/serving; it is git-ignored and is
+          #                NOT baked into the backend image)
+          #   materialise  only pull the published objects down onto the PVC
+          #                from an already-populated bucket -- this is the mode
+          #                to use when the image carries only the manifests
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              mode="${DATASETS_SYNC_MODE:-all}"
+              echo "mode=${mode}"
+              echo "object store: ${OPENCE_S3_ENDPOINT} bucket ${OPENCE_S3_BUCKET}"
+              echo "serving tree: ${OPENCE_DATASET_SERVING_DIR}"
+
+              # ---- 1. publish to MinIO -------------------------------------
+              # scripts/sync_datasets.py verifies each file against the sha256 in
+              # its manifest before uploading, and is idempotent (identical bytes
+              # are not re-uploaded). It reads datasets/serving from the repo
+              # working tree, so this step needs those files present.
+              if [ "${mode}" = "all" ] || [ "${mode}" = "upload" ]; then
+                if [ -d /app/datasets/serving ] && [ -n "$(ls -A /app/datasets/serving 2>/dev/null)" ]; then
+                  python scripts/sync_datasets.py
+                elif [ "${mode}" = "upload" ]; then
+                  echo "FAILED: /app/datasets/serving is empty or missing." >&2
+                  echo "Run scripts/fetch_datasets.py and rebuild the image, or run the upload from CI." >&2
+                  exit 1
+                else
+                  echo "skipping upload: /app/datasets/serving is not present in this image."
+                  echo "assuming the bucket is already populated; continuing with materialise."
+                fi
+              fi
+
+              # ---- 2. materialise onto the PVC -----------------------------
+              # Download every published object named by the manifests to its
+              # relative_mount_path and verify the sha256. boto3 ships in the
+              # backend image (scripts/sync_datasets.py depends on it).
+              if [ "${mode}" = "all" ] || [ "${mode}" = "materialise" ]; then
+                python - <<'PY'
+              import hashlib
+              import json
+              import os
+              import sys
+              from pathlib import Path
+
+              import boto3
+
+              manifests_dir = Path("/app/datasets/manifests")
+              target_root = Path(os.environ["OPENCE_DATASET_SERVING_DIR"])
+              bucket = os.environ.get("OPENCE_S3_BUCKET", "opencs-datasets")
+
+              client = boto3.client(
+                  "s3",
+                  endpoint_url=os.environ["OPENCE_S3_ENDPOINT"],
+                  aws_access_key_id=os.environ["OPENCE_S3_ACCESS_KEY"],
+                  aws_secret_access_key=os.environ["OPENCE_S3_SECRET_KEY"],
+                  region_name=os.environ.get("OPENCE_S3_REGION", "us-east-1"),
+              )
+
+              def sha256(path: Path) -> str:
+                  digest = hashlib.sha256()
+                  with path.open("rb") as handle:
+                      for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                          digest.update(chunk)
+                  return digest.hexdigest()
+
+              documents = sorted(p for p in manifests_dir.glob("*.json") if p.name != "index.json")
+              if not documents:
+                  sys.exit("no manifests found in /app/datasets/manifests")
+
+              failures = 0
+              written = 0
+              for document in documents:
+                  manifest = json.loads(document.read_text())
+                  slug = manifest.get("slug") or manifest.get("dataset_id")
+                  for version in manifest.get("versions", []):
+                      relative = version["relative_mount_path"]
+                      expected = version["sha256"].lower()
+                      destination = target_root / relative
+                      destination.parent.mkdir(parents=True, exist_ok=True)
+
+                      if destination.exists() and sha256(destination) == expected:
+                          print(f"[{slug}] up to date {relative}")
+                          written += 1
+                          continue
+
+                      client.download_file(bucket, version["object_key"], str(destination))
+                      actual = sha256(destination)
+                      if actual != expected:
+                          failures += 1
+                          print(f"[{slug}] sha256 mismatch on {relative}: {actual} != {expected}", file=sys.stderr)
+                          continue
+                      # Manifests travel with the data so notebook-side tooling
+                      # and the backend can resolve metadata from the mount.
+                      (destination.parent / "manifest.json").write_text(
+                          json.dumps(version, indent=2) + "\n"
+                      )
+                      written += 1
+                      print(f"[{slug}] materialised {relative}")
+
+              # uid/gid 1000 must be able to read the tree from a read-only mount.
+              for path in target_root.rglob("*"):
+                  try:
+                      os.chmod(path, 0o555 if path.is_dir() else 0o444)
+                  except OSError:
+                      pass
+
+              print(f"\nmaterialised {written} file(s), {failures} failure(s)")
+              sys.exit(1 if failures else 0)
+              PY
+              fi
+
+              echo "dataset serving tree ready"
+              find "${OPENCE_DATASET_SERVING_DIR}" -maxdepth 3 | sort
+          envFrom:
+            - configMapRef:
+                name: opencs-config
+          env:
+            - name: OPENCE_DATASET_SERVING_DIR
+              value: /opt/opencs/datasets
+            # all | upload | materialise -- see the command comment above.
+            - name: DATASETS_SYNC_MODE
+              value: "all"
+            - name: OPENCE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: opencs-secrets
+                  key: OPENCE_DATABASE_URL
+            - name: OPENCE_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: opencs-secrets
+                  key: OPENCE_S3_ACCESS_KEY
+            - name: OPENCE_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: opencs-secrets
+                  key: OPENCE_S3_SECRET_KEY
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: datasets
+              mountPath: /opt/opencs/datasets
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: datasets
+          persistentVolumeClaim:
+            claimName: opencs-datasets
+        - name: tmp
+          emptyDir: {}

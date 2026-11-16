@@ -1,0 +1,38 @@
+# OpenCS Labs -- notebook image, top-level requirements.
+#
+# This is the human-edited input file. It intentionally uses loose lower bounds
+# only: the reproducible, fully pinned set that the image actually installs is
+# `requirements.lock` (compile this file, then pin every resolved version).
+#
+# Every package here is part of the course contract in HLD.md section 11: a
+# student notebook that works on one deployment must work on every deployment,
+# so all of these must exist in the image and are exercised by
+# `smoke-tests/test_environment.py`.
+#
+# Regenerating the lock:
+#   python -m piptools compile --generate-hashes=false requirements.in \
+#       --output-file requirements.lock   # then re-add the header block
+#
+# --- Jupyter stack ---------------------------------------------------------
+jupyterlab>=4.4,<5
+# Provides jupyterhub-singleuser: the Hub authenticates the single-user server's
+# API token, so this must live in the notebook image, not only in the Hub image.
+jupyterhub==4.1.5
+ipykernel>=6.29,<8
+# --- Core data stack -------------------------------------------------------
+numpy>=2.0,<3
+pandas>=2.2,<4
+matplotlib>=3.9,<4
+seaborn>=0.13,<0.14
+plotly>=5.24
+scipy>=1.11,<2
+statsmodels>=0.14,<0.16
+scikit-learn>=1.5,<2
+xgboost>=2.1,<4
+# --- Tabular IO / storage drivers -----------------------------------------
+openpyxl>=3.1,<4
+pyarrow>=17,<27
+fastparquet>=2024.5
+sqlalchemy>=2.0,<3
+# --- Test tooling (the mounted smoke tests run inside this image) ----------
+pytest>=8.3,<10

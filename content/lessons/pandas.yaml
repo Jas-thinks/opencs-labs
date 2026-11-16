@@ -1,0 +1,462 @@
+slug: pandas
+title: Pandas
+description: Series, DataFrames, selection, filtering, grouping, aggregation and joins — the working language of tabular analysis.
+
+lessons:
+  - slug: pandas-series-and-dataframes
+    title: Series and DataFrames
+    objective: Select rows and columns precisely, filter with boolean conditions, and create derived columns safely.
+    summary: Use the iris table to practise loc, iloc, boolean filters and assignment, and learn when pandas returns a view versus a copy.
+    estimated_minutes: 16
+    datasets: [iris]
+    exercises: [pandas-select-iris]
+    notebook_activity:
+      title: Selection and filtering in iris
+      intro_markdown: |
+        # Series and DataFrames
+
+        A `Series` is one labelled column. A `DataFrame` is a table of aligned
+        Series. This activity drills the selection tools you will use constantly.
+      cells:
+        - source: |
+            import pandas as pd
+
+            df = pd.read_csv("/opt/opencs/datasets/iris/v1/iris.csv")
+            df.head()
+        - source: |
+            print(df["petal_length"].head(3))          # Series
+            print(df[["species", "petal_length"]].head(3))  # DataFrame
+        - cell_type: markdown
+          source: |
+            ## loc and iloc
+
+            `loc` uses labels; `iloc` uses integer positions. A slice with `loc`
+            includes the endpoint; `iloc` excludes it.
+        - source: |
+            print(df.loc[0:2, ["species", "petal_length"]])
+            print(df.iloc[0:3, 4])
+        - cell_type: markdown
+          source: |
+            ## Filter and derive
+        - source: |
+            long = df[df["petal_length"] > 5].copy()
+            long["petal_area_approx"] = long["petal_length"] * long["petal_width"]
+            long.sort_values("petal_area_approx", ascending=False).head()
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                The iris table has 150 rows and five columns. Every row is one flower;
+                the first four columns are measurements, the fifth is the species
+                label. We will select subsets of it in several precise ways.
+            - type: table
+              caption: The first five iris rows.
+              columns:
+                - {key: sepal_length, label: sepal_length}
+                - {key: sepal_width, label: sepal_width}
+                - {key: petal_length, label: petal_length}
+                - {key: petal_width, label: petal_width}
+                - {key: species, label: species}
+              rows:
+                - {sepal_length: 5.1, sepal_width: 3.5, petal_length: 1.4, petal_width: 0.2, species: setosa}
+                - {sepal_length: 4.9, sepal_width: 3.0, petal_length: 1.4, petal_width: 0.2, species: setosa}
+                - {sepal_length: 4.7, sepal_width: 3.2, petal_length: 1.3, petal_width: 0.2, species: setosa}
+                - {sepal_length: 4.6, sepal_width: 3.1, petal_length: 1.5, petal_width: 0.2, species: setosa}
+                - {sepal_length: 5.0, sepal_width: 3.6, petal_length: 1.4, petal_width: 0.2, species: setosa}
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: steps
+              items:
+                - title: One column
+                  text: '`df["col"]` returns a Series.'
+                - title: Several columns
+                  text: '`df[["a", "b"]]` returns a DataFrame.'
+                - title: Label-based
+                  text: "`df.loc[rows, cols]` uses index labels and column names."
+                - title: Position-based
+                  text: "`df.iloc[rows, cols]` uses zero-based integer positions."
+                - title: Boolean filter
+                  text: '`df[df["score"] > 10]` keeps matching rows.'
+            - type: callout
+              variant: warning
+              title: loc slices include the end
+              text: |
+                `df.loc[0:2]` returns rows 0, 1 **and** 2. `df.iloc[0:2]` returns rows
+                0 and 1. Mixing these up is one of the most common pandas bugs.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              source: |
+                import pandas as pd
+
+                df = pd.read_csv("/opt/opencs/datasets/iris/v1/iris.csv")
+                print(df.shape)
+                print(df.index[:5].tolist())
+                print(df.columns.tolist())
+            - type: output
+              kind: text
+              text: |
+                (150, 5)
+                [0, 1, 2, 3, 4]
+                ['sepal_length', 'sepal_width', 'petal_length', 'petal_width', 'species']
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              caption: Three equivalent selections, three different shapes.
+              source: |
+                print(type(df["petal_length"]))
+                print(type(df[["petal_length"]]))
+                print(df.loc[0:2, ["species", "petal_length"]])
+            - type: output
+              kind: text
+              text: |
+                <class 'pandas.core.series.Series'>
+                <class 'pandas.core.frame.DataFrame'>
+                   species  petal_length
+                0   setosa           1.4
+                1   setosa           1.4
+                2   setosa           1.3
+            - type: code
+              language: python
+              caption: Filter, copy, derive.
+              source: |
+                long = df[df["petal_length"] > 5].copy()
+                long["petal_area_approx"] = long["petal_length"] * long["petal_width"]
+                print(len(long))
+                print(long["petal_area_approx"].describe().round(2))
+            - type: output
+              kind: text
+              text: |
+                42
+                count    42.00
+                mean     11.75
+                std       2.02
+                min       7.65
+                25%      10.11
+                50%      11.86
+                75%      13.33
+                max      15.87
+                Name: petal_area_approx, dtype: float64
+            - type: callout
+              variant: tip
+              title: Derive columns with arithmetic
+              text: |
+                `df["area"] = df["length"] * df["width"]` is vectorised, readable
+                and fast. Reach for `.apply()` only when arithmetic cannot express it.
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: chart
+              title: Petal length versus petal width
+              caption: Two clear clusters; setosa separates almost completely.
+              spec:
+                type: scatter
+                x: petal_length
+                y: petal_width
+                series: species
+                data:
+                  - {petal_length: 1.4, petal_width: 0.2, species: setosa}
+                  - {petal_length: 1.3, petal_width: 0.2, species: setosa}
+                  - {petal_length: 4.7, petal_width: 1.4, species: versicolor}
+                  - {petal_length: 4.5, petal_width: 1.5, species: versicolor}
+                  - {petal_length: 6.0, petal_width: 2.5, species: virginica}
+                  - {petal_length: 5.1, petal_width: 1.9, species: virginica}
+                  - {petal_length: 5.9, petal_width: 2.3, species: virginica}
+                  - {petal_length: 3.9, petal_width: 1.2, species: versicolor}
+                  - {petal_length: 1.5, petal_width: 0.1, species: setosa}
+                  - {petal_length: 6.9, petal_width: 2.3, species: virginica}
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: '`SettingWithCopyWarning` on `long["x"] = ...`'
+                  explanation: '`long` was produced by filtering and may be a view.'
+                  fix: Add `.copy()` when you intend to modify the filtered frame.
+                - error: "Using double quotes inside a loc expression"
+                  explanation: Nested double quotes confuse parsing.
+                  fix: Use single quotes inside, or a variable — `df.loc[df['species'] == 'setosa']`.
+                - error: "`df.petal_length` fails after renaming"
+                  explanation: Attribute access only works for valid, unchanged names.
+                  fix: Prefer bracket access — `df["petal_length"]`.
+                - error: "Filtering returns an empty DataFrame"
+                  explanation: The comparison was between incompatible types, e.g. string `">5"`.
+                  fix: Check `dtype` and convert with `pd.to_numeric`.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The practice exercise gives you a set of questions about iris and asks
+                for a single filtered DataFrame that answers all of them.
+            - type: checklist
+              items:
+                - "I can distinguish Series from DataFrame results."
+                - "I can use loc and iloc correctly, including slice semantics."
+                - "I can filter with multiple conditions using parentheses."
+                - "I can derive new columns safely."
+      takeaways:
+        - A Series is one labelled column; a DataFrame is a dict of aligned Series.
+        - loc is label-based and inclusive; iloc is position-based and exclusive.
+        - Filtered frames should be copied before mutation.
+        - Bracket access is safer than attribute access for column names.
+      glossary:
+        - term: Series
+          definition: A one-dimensional labelled array.
+        - term: DataFrame
+          definition: A two-dimensional table with labelled rows and columns.
+        - term: Index
+          definition: The row labels of a DataFrame.
+
+  - slug: pandas-groupby-and-joins
+    title: GroupBy, Aggregation and Joins
+    objective: Summarise groups with named aggregations, reshape with pivot_table, and combine tables with merge.
+    summary: Answer "which day and party size tips best?" with groupby, then join a species lookup table to iris.
+    estimated_minutes: 18
+    datasets: [tips, iris]
+    exercises: [pandas-groupby-tips, pandas-multi-agg-retail]
+    notebook_activity:
+      title: GroupBy on restaurant bills
+      intro_markdown: |
+        # GroupBy and Joins
+
+        Split → apply → combine is the core of tabular analysis. You will produce
+        a multi-statistic summary, then attach a lookup table with `merge`.
+      cells:
+        - source: |
+            import pandas as pd
+
+            df = pd.read_csv("/opt/opencs/datasets/tips/v1/tips.csv")
+            df.groupby("day")["total_bill"].agg(["count", "mean", "median"]).round(2)
+        - cell_type: markdown
+          source: |
+            ## Named aggregation
+        - source: |
+            summary = df.groupby("day").agg(
+                bills=("total_bill", "count"),
+                avg_bill=("total_bill", "mean"),
+                avg_tip=("tip", "mean"),
+                max_bill=("total_bill", "max"),
+            ).round(2)
+            summary
+        - cell_type: markdown
+          source: |
+            ## Pivot: day against smoker status
+        - source: |
+            df.pivot_table(index="day", columns="smoker", values="tip", aggfunc="mean").round(2)
+        - cell_type: markdown
+          source: |
+            ## Merge a lookup table
+        - source: |
+            species = pd.DataFrame({
+                "species": ["setosa", "versicolor", "virginica"],
+                "genus": ["Iris", "Iris", "Iris"],
+            })
+            iris = pd.read_csv("/opt/opencs/datasets/iris/v1/iris.csv")
+            iris.merge(species, on="species", how="left").head()
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                Grouping answers questions of the form *"per what?"*. The tips table
+                has 244 bills across four days, two meal times, two sexes and two
+                smoker categories. Any of those columns can define groups.
+            - type: table
+              caption: The same table summarised two ways.
+              columns:
+                - {key: day, label: day}
+                - {key: bills, label: bills}
+                - {key: avg_bill, label: avg_bill}
+                - {key: avg_tip, label: avg_tip}
+              rows:
+                - {day: Fri, bills: 19, avg_bill: 17.15, avg_tip: 2.73}
+                - {day: Sat, bills: 87, avg_bill: 20.44, avg_tip: 2.99}
+                - {day: Sun, bills: 76, avg_bill: 21.41, avg_tip: 3.26}
+                - {day: Thur, bills: 62, avg_bill: 17.68, avg_tip: 2.77}
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: steps
+              items:
+                - title: Split
+                  text: Rows are partitioned by the values of one or more keys.
+                - title: Apply
+                  text: An aggregation runs inside each partition — mean, count, max, custom.
+                - title: Combine
+                  text: Results are reassembled into a new table indexed by the group keys.
+            - type: markdown
+              text: |
+                `merge` is a separate operation: it aligns rows from two tables on a
+                shared key, like a SQL join. Use `how="left"` when the left table must
+                keep all its rows, even when no match exists.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              source: |
+                import pandas as pd
+
+                df = pd.read_csv("/opt/opencs/datasets/tips/v1/tips.csv")
+                print(df["day"].value_counts())
+                print(df["day"].nunique(), "distinct days")
+            - type: output
+              kind: text
+              text: |
+                Sat     87
+                Sun     76
+                Thur    62
+                Fri     19
+                Name: day, dtype: int64
+                4 distinct days
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              caption: Named aggregation reads like a report.
+              source: |
+                summary = df.groupby("day").agg(
+                    bills=("total_bill", "count"),
+                    avg_bill=("total_bill", "mean"),
+                    avg_tip=("tip", "mean"),
+                    max_bill=("total_bill", "max"),
+                ).round(2)
+                print(summary)
+            - type: output
+              kind: table
+              columns:
+                - {key: day, label: day}
+                - {key: bills, label: bills}
+                - {key: avg_bill, label: avg_bill}
+                - {key: avg_tip, label: avg_tip}
+                - {key: max_bill, label: max_bill}
+              rows:
+                - {day: Fri, bills: 19, avg_bill: 17.15, avg_tip: 2.73, max_bill: 40.17}
+                - {day: Sat, bills: 87, avg_bill: 20.44, avg_tip: 2.99, max_bill: 50.81}
+                - {day: Sun, bills: 76, avg_bill: 21.41, avg_tip: 3.26, max_bill: 48.17}
+                - {day: Thur, bills: 62, avg_bill: 17.68, avg_tip: 2.77, max_bill: 43.11}
+            - type: code
+              language: python
+              caption: Reshape into a day × smoker matrix.
+              source: |
+                print(df.pivot_table(index="day", columns="smoker", values="tip", aggfunc="mean").round(2))
+            - type: output
+              kind: table
+              columns:
+                - {key: day, label: day}
+                - {key: No, label: smoker No}
+                - {key: Yes, label: smoker Yes}
+              rows:
+                - {day: Fri, No: 2.81, Yes: 2.69}
+                - {day: Sat, No: 3.11, Yes: 2.87}
+                - {day: Sun, No: 3.17, Yes: 3.52}
+                - {day: Thur, No: 2.67, Yes: 3.03}
+            - type: code
+              language: python
+              caption: Merge attaches a lookup table without changing row count.
+              source: |
+                lookup = pd.DataFrame({
+                    "species": ["setosa", "versicolor", "virginica"],
+                    "genus": ["Iris", "Iris", "Iris"],
+                })
+                iris = pd.read_csv("/opt/opencs/datasets/iris/v1/iris.csv")
+                joined = iris.merge(lookup, on="species", how="left")
+                print(joined.shape)
+                print(joined["genus"].value_counts())
+            - type: output
+              kind: text
+              text: |
+                (150, 6)
+                Iris    150
+                Name: genus, dtype: int64
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: markdown
+              text: |
+                The pivot table is easiest to read as grouped bars. Sunday is the only
+                day where smokers out-tip non-smokers, but notice how small the
+                differences are and how many observations back each bar.
+            - type: chart
+              title: Average tip by day and smoker status
+              caption: Differences are small; sample sizes per cell range from a handful to dozens.
+              spec:
+                type: bar
+                x: day
+                y: tip
+                series: smoker
+                data:
+                  - {day: Fri, smoker: "No", tip: 2.81}
+                  - {day: Fri, smoker: "Yes", tip: 2.69}
+                  - {day: Sat, smoker: "No", tip: 3.11}
+                  - {day: Sat, smoker: "Yes", tip: 2.87}
+                  - {day: Sun, smoker: "No", tip: 3.17}
+                  - {day: Sun, smoker: "Yes", tip: 3.52}
+                  - {day: Thur, smoker: "No", tip: 2.67}
+                  - {day: Thur, smoker: "Yes", tip: 3.03}
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: '`df.groupby("day")` is printed but nothing happens'
+                  explanation: A GroupBy object is lazy; it needs an aggregation.
+                  fix: Add `.agg(...)`, `.mean()` or iterate the groups deliberately.
+                - error: "After groupby the day column is gone"
+                  explanation: Group keys become the index.
+                  fix: Use `as_index=False` or call `.reset_index()`.
+                - error: "A merge multiplied the row count"
+                  explanation: The right table had duplicate keys, creating many-to-many matches.
+                  fix: Check `lookup.duplicated(subset="key").any()` before merging.
+                - error: "`mean` of a metric across groups is wrong"
+                  explanation: You averaged already-averaged values instead of recomputing from rows.
+                  fix: Aggregate from the original rows, not from a summary table.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                Two exercises follow this lesson: an easy groupby on tips and a harder
+                multi-column aggregation on the retail sample.
+            - type: checklist
+              items:
+                - "I can produce a named aggregation with several statistics."
+                - "I can reshape with pivot_table."
+                - "I can merge a lookup table and verify the row count."
+                - "I check for duplicate keys before joining."
+      takeaways:
+        - GroupBy is split → apply → combine.
+        - Named aggregation produces readable, stable column names.
+        - pivot_table reshapes long data into a matrix.
+        - Merge cardinality must be checked; duplicates silently multiply rows.
+      glossary:
+        - term: GroupBy
+          definition: An operation that partitions rows by key before aggregating.
+        - term: Pivot table
+          definition: A summary table with group keys on rows and columns.
+        - term: Join / merge
+          definition: Combining two tables on a shared key.

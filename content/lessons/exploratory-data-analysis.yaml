@@ -1,0 +1,432 @@
+slug: exploratory-data-analysis
+title: Exploratory Data Analysis
+description: Describe, compare and relate — the disciplined first pass over any new dataset.
+
+lessons:
+  - slug: descriptive-statistics
+    title: Shape, Describe and Summarise
+    objective: Summarise a new table with shape, dtypes, distribution statistics and categorical counts.
+    summary: Run a full first-pass EDA on 1,599 red wines, including skew, quantiles and the quality distribution.
+    estimated_minutes: 16
+    datasets: [wine-quality]
+    exercises: [eda-wine-quality]
+    notebook_activity:
+      title: First pass on the wine table
+      intro_markdown: |
+        # Shape, Describe, Summarise
+
+        A disciplined first pass answers: how big is the table, what types are
+        present, what does each numeric column look like, and how are the
+        categories distributed?
+      cells:
+        - source: |
+            import pandas as pd
+
+            df = pd.read_csv("/opt/opencs/datasets/wine-quality/v1/winequality-red.csv")
+            print(df.shape)
+            df.head()
+        - source: |
+            df.describe().T.round(2)
+        - source: |
+            df["quality"].value_counts().sort_index()
+        - cell_type: markdown
+          source: |
+            ## Skew
+
+            A positive skew means a long right tail. Compare mean and median.
+        - source: |
+            summary = df[["alcohol", "volatile_acidity", "residual_sugar"]].agg(["mean", "median", "skew"]).T.round(3)
+            summary
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                The wine table has 1,599 red wines, 11 physicochemical measurements
+                and one quality score (3–8). Before asking any modelling question, we
+                want to know what is typical, what is rare, and what is suspicious.
+            - type: table
+              caption: The first rows of the wine table.
+              columns:
+                - {key: fixed_acidity, label: fixed_acidity}
+                - {key: volatile_acidity, label: volatile_acidity}
+                - {key: alcohol, label: alcohol}
+                - {key: quality, label: quality}
+              rows:
+                - {fixed_acidity: 7.4, volatile_acidity: 0.7, alcohol: 9.4, quality: 5}
+                - {fixed_acidity: 7.8, volatile_acidity: 0.88, alcohol: 9.8, quality: 5}
+                - {fixed_acidity: 7.8, volatile_acidity: 0.76, alcohol: 9.8, quality: 5}
+                - {fixed_acidity: 11.2, volatile_acidity: 0.28, alcohol: 9.8, quality: 6}
+                - {fixed_acidity: 7.4, volatile_acidity: 0.7, alcohol: 9.4, quality: 5}
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: markdown
+              text: |
+                Five numbers describe most numeric columns: **mean**, **median**,
+                **standard deviation**, **minimum** and **maximum**. Quartiles add the
+                25%, 50% and 75% positions. `describe()` gives all of them at once.
+
+                For categorical columns, use `value_counts()`. The distribution of the
+                target (`quality`) tells you whether a classification problem is
+                balanced.
+            - type: callout
+              variant: info
+              title: Skew, in one sentence
+              text: |
+                If the mean is much larger than the median, the column has a long right
+                tail; if it is much smaller, a long left tail. Alcohol: mean 10.42,
+                median 10.2 — mildly right-skewed.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              source: |
+                import pandas as pd
+
+                df = pd.read_csv("/opt/opencs/datasets/wine-quality/v1/winequality-red.csv")
+                print(df.shape)
+                print(df["quality"].value_counts().sort_index())
+            - type: output
+              kind: text
+              text: |
+                (1599, 12)
+                quality
+                3      10
+                4      53
+                5     681
+                6     638
+                7     199
+                8      18
+                Name: count, dtype: int64
+            - type: markdown
+              text: |
+                Most wines score 5 or 6. Only 18 score 8 and just 10 score 3. A model
+                trained on this table will rarely see extremes — so it will rarely
+                predict them.
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              caption: Transpose describe so each column is a row.
+              source: |
+                print(df.describe().T[["mean", "std", "min", "50%", "max"]].round(2).head(6))
+            - type: output
+              kind: table
+              columns:
+                - {key: column, label: column}
+                - {key: mean, label: mean}
+                - {key: std, label: std}
+                - {key: min, label: min}
+                - {key: "50%", label: median}
+                - {key: max, label: max}
+              rows:
+                - {column: fixed_acidity, mean: 8.32, std: 1.74, min: 4.6, "50%": 7.9, max: 15.9}
+                - {column: volatile_acidity, mean: 0.53, std: 0.18, min: 0.12, "50%": 0.52, max: 1.58}
+                - {column: citric_acid, mean: 0.27, std: 0.19, min: 0.0, "50%": 0.26, max: 1.0}
+                - {column: residual_sugar, mean: 2.54, std: 1.41, min: 0.9, "50%": 2.2, max: 15.5}
+                - {column: alcohol, mean: 10.42, std: 1.07, min: 8.4, "50%": 10.2, max: 14.9}
+                - {column: quality, mean: 5.64, std: 0.81, min: 3.0, "50%": 6.0, max: 8.0}
+            - type: code
+              language: python
+              caption: Skew quantifies the tail.
+              source: |
+                print(df[["alcohol", "volatile_acidity", "residual_sugar"]].skew().round(3))
+            - type: output
+              kind: text
+              text: |
+                alcohol            0.861
+                volatile_acidity   0.672
+                residual_sugar     4.541
+                dtype: float64
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: markdown
+              text: |
+                The quality histogram is strongly unbalanced. This matters for every
+                later modelling decision: accuracy alone will be misleading.
+            - type: chart
+              title: Wine quality distribution
+              caption: 1,319 of 1,599 wines score 5 or 6.
+              spec:
+                type: bar
+                x: quality
+                y: count
+                data:
+                  - {quality: 3, count: 10}
+                  - {quality: 4, count: 53}
+                  - {quality: 5, count: 681}
+                  - {quality: 6, count: 638}
+                  - {quality: 7, count: 199}
+                  - {quality: 8, count: 18}
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: "`describe()` omits a column you care about"
+                  explanation: It only includes numeric columns by default.
+                  fix: Use `describe(include="all")` or summarise the column explicitly.
+                - error: "The mean looks fine but the column is pathological"
+                  explanation: A few extreme values can leave the mean unchanged while distorting the tail.
+                  fix: Look at min, max and quantiles, not just the mean.
+                - error: "Value counts hide rare categories"
+                  explanation: Sorting by count buries the small groups.
+                  fix: Use `sort_index()` or `normalize=True` to see proportions.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The exercise asks for a structured EDA report of the wine table with
+                assertions on shape, ranges and the quality distribution.
+            - type: checklist
+              items:
+                - "I can produce a shape, dtype and missingness summary."
+                - "I can read describe() and explain each statistic."
+                - "I use value_counts for categorical targets."
+                - "I check skew before choosing mean or median."
+      takeaways:
+        - First-pass EDA is cheap and prevents expensive mistakes later.
+        - describe() summarises numeric columns; value_counts summarises categories.
+        - Skew tells you whether the mean represents a typical value.
+        - Unbalanced targets change how models must be evaluated.
+      glossary:
+        - term: Skew
+          definition: Asymmetry of a distribution; a long tail on one side.
+        - term: Quantile
+          definition: The value below which a given fraction of observations fall.
+        - term: Class imbalance
+          definition: A target distribution where some classes are much rarer than others.
+
+  - slug: correlation-and-relationships
+    title: Correlation and Relationships
+    objective: Quantify linear and monotonic relationships, and explain what correlation does not prove.
+    summary: Compare income and house value in California, inspect a correlation matrix, and separate correlation from causation.
+    estimated_minutes: 15
+    datasets: [california-housing]
+    exercises: [correlation-california]
+    notebook_activity:
+      title: Correlation in California housing
+      intro_markdown: |
+        # Correlation and Relationships
+
+        Correlation measures how two columns move together. It does not tell you
+        why, and it is sensitive to the shape of the relationship.
+      cells:
+        - source: |
+            import pandas as pd
+
+            df = pd.read_csv("/opt/opencs/datasets/california-housing/v1/housing.csv")
+            df[["median_income", "median_house_value"]].corr().round(3)
+        - source: |
+            numeric = df.select_dtypes("number")
+            corr = numeric.corr()["median_house_value"].sort_values(ascending=False)
+            corr.round(3).head(8)
+        - cell_type: markdown
+          source: |
+            ## Pearson vs Spearman
+
+            Pearson measures linear association; Spearman measures monotonic order.
+        - source: |
+            from scipy.stats import pearsonr, spearmanr
+            x = df["median_income"]
+            y = df["median_house_value"]
+            print("pearson ", round(pearsonr(x, y).statistic, 3))
+            print("spearman", round(spearmanr(x, y).statistic, 3))
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                The California housing table has 20,640 districts. `median_income`
+                and `median_house_value` clearly rise together. The Pearson correlation
+                is 0.688 — strong, but far from perfect. A useful analysis asks *how*
+                the relationship behaves, not only *how strong* it is.
+            - type: chart
+              title: Median income versus median house value
+              caption: A positive, roughly linear relationship with a visible cap at 500,001.
+              spec:
+                type: scatter
+                x: median_income
+                y: median_house_value
+                data:
+                  - {median_income: 8.3252, median_house_value: 452600}
+                  - {median_income: 8.3014, median_house_value: 358500}
+                  - {median_income: 7.2574, median_house_value: 352100}
+                  - {median_income: 5.6431, median_house_value: 341300}
+                  - {median_income: 3.8462, median_house_value: 342200}
+                  - {median_income: 4.0368, median_house_value: 269700}
+                  - {median_income: 3.6591, median_house_value: 299200}
+                  - {median_income: 3.12, median_house_value: 241400}
+                  - {median_income: 2.0804, median_house_value: 226700}
+                  - {median_income: 1.7, median_house_value: 162500}
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: markdown
+              text: |
+                Correlation coefficients range from -1 to +1:
+
+                * `+1` — perfect positive monotonic relationship.
+                * `0` — no linear association (not necessarily no relationship).
+                * `-1` — perfect negative relationship.
+
+                **Pearson** assumes roughly linear relationships and is sensitive to
+                outliers. **Spearman** works on ranks, so it captures any monotonic
+                relationship and is more robust.
+            - type: callout
+              variant: warning
+              title: Correlation is not causation
+              text: |
+                Districts with higher incomes have more expensive houses. That does not
+                prove income causes price, nor price causes income. A third factor —
+                location — drives both.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              source: |
+                import pandas as pd
+
+                df = pd.read_csv("/opt/opencs/datasets/california-housing/v1/housing.csv")
+                corr = df.select_dtypes("number").corr()["median_house_value"]
+                print(corr.sort_values(ascending=False).round(3).head(8))
+            - type: output
+              kind: text
+              text: |
+                median_house_value    1.000
+                median_income         0.688
+                total_rooms          0.134
+                housing_median_age   0.106
+                households           0.065
+                total_bedrooms       0.050
+                population          -0.024
+                longitude           -0.046
+                Name: median_house_value, dtype: float64
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              source: |
+                from scipy.stats import pearsonr, spearmanr
+
+                x = df["median_income"]
+                y = df["median_house_value"]
+                print("pearson :", round(pearsonr(x, y).statistic, 3))
+                print("spearman:", round(spearmanr(x, y).statistic, 3))
+            - type: output
+              kind: text
+              text: |
+                pearson : 0.688
+                spearman: 0.677
+            - type: markdown
+              text: |
+                Similar values suggest the relationship is approximately linear. If
+                Spearman were much higher, the relationship would be monotonic but
+                curved. If both are low, inspect the scatter plot before concluding
+                there is no relationship — a U-shape can produce near-zero correlation.
+            - type: code
+              language: python
+              caption: A grouped comparison often explains more than a coefficient.
+              source: |
+                grouped = df.groupby("ocean_proximity")["median_house_value"].agg(["count", "median"]).round(0)
+                print(grouped.sort_values("median", ascending=False))
+            - type: output
+              kind: table
+              columns:
+                - {key: ocean_proximity, label: ocean_proximity}
+                - {key: count, label: count}
+                - {key: median, label: median value}
+              rows:
+                - {ocean_proximity: ISLAND, count: 5, median: 414700}
+                - {ocean_proximity: NEAR BAY, count: 2290, median: 233800}
+                - {ocean_proximity: NEAR OCEAN, count: 2658, median: 229450}
+                - {ocean_proximity: "<1H OCEAN", count: 9136, median: 214850}
+                - {ocean_proximity: INLAND, count: 6551, median: 108500}
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: markdown
+              text: |
+                A correlation matrix lets you scan many pairs at once. Dark positive
+                cells near the diagonal are expected; look for unexpected off-diagonal
+                values.
+            - type: table
+              caption: Selected correlation matrix values.
+              columns:
+                - {key: pair, label: pair}
+                - {key: r, label: Pearson r}
+                - {key: reading, label: reading}
+              rows:
+                - {pair: median_income ↔ median_house_value, r: 0.688, reading: strong positive}
+                - {pair: total_rooms ↔ households, r: 0.918, reading: very strong, partly mechanical}
+                - {pair: longitude ↔ latitude, r: -0.925, reading: geography, not a causal pair}
+                - {pair: population ↔ median_house_value, r: -0.024, reading: negligible linear association}
+            - type: callout
+              variant: tip
+              title: Beware mechanical correlations
+              text: |
+                `total_rooms` and `households` are correlated because both grow with
+                district size. Correlations between two measures of the same quantity
+                are usually uninformative.
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: "A correlation of 0 is reported as 'no relationship'"
+                  explanation: Pearson only detects linear association.
+                  fix: Plot the data; consider Spearman or a grouped comparison.
+                - error: "The correlation matrix is dominated by scale differences"
+                  explanation: Correlations are unitless, but visual heatmaps can be misread.
+                  fix: Read the numbers, and annotate the matrix.
+                - error: "A high correlation is claimed as a causal effect"
+                  explanation: Observational data rarely supports causal claims.
+                  fix: Describe association; suggest confounders and an experiment.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The exercise asks you to compute a correlation table, interpret the top
+                relationships, and identify one likely confounder.
+            - type: checklist
+              items:
+                - "I can compute Pearson and Spearman correlations."
+                - "I can read a correlation matrix without over-claiming."
+                - "I know that near-zero correlation does not prove independence."
+                - "I separate association from causation."
+      takeaways:
+        - Pearson measures linear association; Spearman measures monotonic association.
+        - Always plot before trusting a coefficient.
+        - Mechanical correlations between size-related columns are usually uninformative.
+        - Correlation supports description, not causal claims.
+      glossary:
+        - term: Pearson correlation
+          definition: A measure of linear association between two numeric variables.
+        - term: Spearman correlation
+          definition: A rank-based measure of monotonic association.
+        - term: Confounder
+          definition: A third variable that influences both compared variables.

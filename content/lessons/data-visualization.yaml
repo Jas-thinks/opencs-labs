@@ -1,0 +1,224 @@
+slug: data-visualization
+title: Data Visualization
+description: Choosing the right chart for the question, and reading charts critically.
+
+lessons:
+  - slug: choosing-the-right-chart
+    title: Choosing the Right Chart
+    objective: Match a question to an appropriate chart type and avoid the most common misleading defaults.
+    summary: Compare species, distributions and relationships in the penguins data with bar, box, histogram and scatter charts.
+    estimated_minutes: 15
+    datasets: [palmer-penguins]
+    exercises: [viz-penguins]
+    notebook_activity:
+      title: Four charts, one dataset
+      intro_markdown: |
+        # Choosing the Right Chart
+
+        The same table supports several charts. The question decides which one is
+        correct. Build each chart, then write one sentence about what it shows.
+      cells:
+        - source: |
+            import pandas as pd
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+
+            df = pd.read_csv("/opt/opencs/datasets/palmer-penguins/v1/penguins.csv")
+            sns.set_theme(style="whitegrid")
+            df.head()
+        - cell_type: markdown
+          source: |
+            ## Comparison across categories
+        - source: |
+            df.groupby("species")["body_mass_g"].mean().plot.bar(title="Mean body mass by species")
+            plt.ylabel("grams")
+            plt.show()
+        - cell_type: markdown
+          source: |
+            ## Distribution
+        - source: |
+            sns.histplot(data=df, x="flipper_length_mm", hue="species", bins=20)
+            plt.show()
+        - cell_type: markdown
+          source: |
+            ## Relationship
+        - source: |
+            sns.scatterplot(data=df, x="bill_length_mm", y="bill_depth_mm", hue="species")
+            plt.show()
+        - cell_type: markdown
+          source: |
+            ## Spread
+        - source: |
+            sns.boxplot(data=df, x="species", y="flipper_length_mm")
+            plt.show()
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                The penguins table has 344 birds across three species and three
+                islands. Each species has a distinct body mass: Adelie and Chinstrap
+                average about 3.7 kg, while Gentoo averages 5.08 kg. A single pooled
+                histogram would suggest a wide distribution; a grouped chart reveals
+                two populations.
+            - type: chart
+              title: Mean body mass by species
+              caption: Bar length encodes a summary statistic, not raw observations.
+              spec:
+                type: bar
+                x: species
+                y: mean_mass
+                data:
+                  - {species: Adelie, mean_mass: 3700.7}
+                  - {species: Chinstrap, mean_mass: 3733.1}
+                  - {species: Gentoo, mean_mass: 5076.0}
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: table
+              caption: Question types and the charts that answer them.
+              columns:
+                - {key: question, label: question type}
+                - {key: chart, label: chart}
+                - {key: avoid, label: avoid}
+              rows:
+                - {question: "How does a summary differ across groups?", chart: Bar chart, avoid: Pie chart with many slices}
+                - {question: "How is one numeric variable distributed?", chart: Histogram / density, avoid: Bar chart of raw values}
+                - {question: "How do two numeric variables relate?", chart: Scatter plot, avoid: Two separate histograms}
+                - {question: "How does a distribution differ across groups?", chart: Box plot / violin, avoid: Bar chart of means only}
+                - {question: "How does a value change over time?", chart: Line chart, avoid: Unordered bars}
+            - type: callout
+              variant: info
+              title: A bar chart hides the distribution
+              text: |
+                Two groups can share a mean while one is tightly clustered and the
+                other spans a wide range. Show the spread when the spread matters.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              source: |
+                import pandas as pd
+
+                df = pd.read_csv("/opt/opencs/datasets/palmer-penguins/v1/penguins.csv")
+                summary = df.groupby("species")["body_mass_g"].agg(["count", "mean", "std"]).round(1)
+                print(summary)
+            - type: output
+              kind: table
+              columns:
+                - {key: species, label: species}
+                - {key: count, label: count}
+                - {key: mean, label: mean}
+                - {key: std, label: std}
+              rows:
+                - {species: Adelie, count: 152, mean: 3700.7, std: 458.6}
+                - {species: Chinstrap, count: 68, mean: 3733.1, std: 384.3}
+                - {species: Gentoo, count: 123, mean: 5076.0, std: 504.1}
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              caption: A box plot shows median, quartiles and outliers.
+              source: |
+                import seaborn as sns
+                import matplotlib.pyplot as plt
+
+                sns.boxplot(data=df, x="species", y="flipper_length_mm")
+                plt.title("Flipper length by species")
+                plt.show()
+            - type: markdown
+              text: |
+                Gentoo flippers are clearly longer. The boxes barely overlap, which
+                means the difference is visible for most individuals — not only in
+                the group means.
+            - type: code
+              language: python
+              caption: A scatter plot with a hue reveals clusters.
+              source: |
+                sns.scatterplot(data=df, x="bill_length_mm", y="bill_depth_mm", hue="species")
+                plt.title("Bill dimensions by species")
+                plt.show()
+            - type: callout
+              variant: tip
+              title: Encode with the right channel
+              text: |
+                Position on a common scale (scatter, line) is read more accurately than
+                area or angle. Prefer position when values must be compared precisely.
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: chart
+              title: Distribution of flipper length by species
+              caption: Box plots expose median, spread and outliers at once.
+              spec:
+                type: box
+                x: species
+                y: flipper_length_mm
+                data:
+                  - {species: Adelie, flipper_length_mm: 181}
+                  - {species: Adelie, flipper_length_mm: 186}
+                  - {species: Adelie, flipper_length_mm: 195}
+                  - {species: Adelie, flipper_length_mm: 193}
+                  - {species: Adelie, flipper_length_mm: 190}
+                  - {species: Chinstrap, flipper_length_mm: 195}
+                  - {species: Chinstrap, flipper_length_mm: 201}
+                  - {species: Chinstrap, flipper_length_mm: 193}
+                  - {species: Chinstrap, flipper_length_mm: 210}
+                  - {species: Chinstrap, flipper_length_mm: 198}
+                  - {species: Gentoo, flipper_length_mm: 231}
+                  - {species: Gentoo, flipper_length_mm: 220}
+                  - {species: Gentoo, flipper_length_mm: 215}
+                  - {species: Gentoo, flipper_length_mm: 222}
+                  - {species: Gentoo, flipper_length_mm: 209}
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: "The y-axis does not start at zero"
+                  explanation: Truncating a bar chart axis exaggerates differences.
+                  fix: Start bar charts at zero; line charts may be truncated if labelled.
+                - error: "A scatter plot is a solid blob"
+                  explanation: Overplotting hides density.
+                  fix: Reduce marker size and alpha, use 2D density or jitter.
+                - error: "A line connects unrelated categories"
+                  explanation: Lines imply an ordered continuum.
+                  fix: Use bars for categories and lines only for ordered time or sequence.
+                - error: "A rainbow palette makes groups unreadable"
+                  explanation: Perceptual ordering is lost and colour-blind readers struggle.
+                  fix: Use a small, accessible categorical palette and label directly.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The exercise asks you to produce three charts from the penguins data
+                and justify the chart type for each question.
+            - type: checklist
+              items:
+                - "I choose charts from the question, not habit."
+                - "I show spread when group differences matter."
+                - "I avoid truncated axes on bar charts."
+                - "I label axes and units."
+      takeaways:
+        - The question dictates the chart type.
+        - Bars summarise; box plots and histograms show distributions.
+        - Scatter plots show relationships; lines imply order.
+        - Axis choices and colour palettes can mislead unintentionally.
+      glossary:
+        - term: Encoding channel
+          definition: The visual property used to represent data, such as position, length or colour.
+        - term: Overplotting
+          definition: Markers overlapping so densely that the underlying distribution is hidden.
+        - term: Box plot
+          definition: A chart of median, quartiles and outlying values.

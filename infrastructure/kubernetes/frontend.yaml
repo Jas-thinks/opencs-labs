@@ -1,0 +1,144 @@
+# OpenCS Labs -- static React build served by nginx.
+#
+# The browser talks to one origin: nginx serves the SPA bundle and the Ingress
+# routes /api and /hub elsewhere. VITE_API_BASE is baked in at build time as
+# `/api/v1`, so the frontend needs no runtime configuration of its own.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opencs-frontend
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/name: opencs-frontend
+    app.kubernetes.io/component: web
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opencs-frontend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: opencs
+        app.kubernetes.io/name: opencs-frontend
+        app.kubernetes.io/component: web
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      securityContext:
+        # nginx must not run as root.
+        #
+        # Binding a privileged port (< 1024) as a non-root user needs
+        # CAP_NET_BIND_SERVICE in the container's effective AND bounding set.
+        # Dropping ALL capabilities here (below) removes it, and a setcap on the
+        # nginx binary does not help because a file capability cannot exceed the
+        # bounding set. Two supported postures:
+        #
+        #   1. (configured below) relax `net.ipv4.ip_unprivileged_port_start` to
+        #      0. It is on the kubelet's safe sysctl list, so this needs no
+        #      privileged pod and lets uid 1000 bind port 80 unassisted.
+        #   2. Build the image to listen on 8080 and change the two port numbers
+        #      (containerPort here and Service targetPort). The Service and
+        #      Ingress refer to the port by NAME, so nothing else moves.
+        #
+        # Prefer 2 if your nodes block that sysctl. Do not set runAsUser: 0 to
+        # "make it work": a root nginx next to the API widens the blast radius of
+        # any nginx CVE, and Pod Security Admission rejects it in `opencs`
+        # (the namespace is labelled enforce=restricted).
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+        sysctls:
+          - name: net.ipv4.ip_unprivileged_port_start
+            value: "0"
+      terminationGracePeriodSeconds: 20
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: opencs-frontend
+      containers:
+        - name: frontend
+          image: opencs/frontend:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          # Static assets: a 200 on `/` proves nginx is serving the SPA shell.
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            # nginx writes its pid file and proxy temp buffers under /var/cache
+            # and /var/run; those are provided as emptyDir mounts below.
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opencs-frontend
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/name: opencs-frontend
+    app.kubernetes.io/component: web
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: opencs-frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

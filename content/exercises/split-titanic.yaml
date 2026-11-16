@@ -1,0 +1,72 @@
+slug: split-titanic
+title: Build an Honest Train/Test Split
+topic: Machine Learning Fundamentals
+difficulty: Medium
+position: 150
+estimated_minutes: 22
+datasets: [titanic]
+related_lesson: train-test-split
+objective: Prepare features without leakage, split with stratification, and compare a model with the majority-class baseline.
+instructions:
+  markdown: |
+    Using the Titanic table, prepare a small feature set and evaluate a logistic
+    regression.
+
+    Produce:
+
+    * `X_train`, `X_test`, `y_train`, `y_test` from a 75/25 stratified split with `random_state=42`.
+    * `baseline_accuracy` — accuracy of always predicting the majority class on the test set.
+    * `model_accuracy` — logistic-regression accuracy on the test set.
+
+    Use the four features prepared in the starter notebook: `pclass`, `sex`,
+    `age`, `fare`.
+starter_notebook:
+  intro_markdown: |
+    # Build an Honest Train/Test Split
+
+    **Objective:** split before fitting, stratify, and beat a baseline honestly.
+
+    Do not fit anything on the test rows.
+  cells:
+    - source: |
+        import pandas as pd
+        from sklearn.model_selection import train_test_split
+        from sklearn.linear_model import LogisticRegression
+
+        df = pd.read_csv("/opt/opencs/datasets/titanic/v1/titanic.csv")
+        data = df[["survived", "pclass", "sex", "age", "fare"]].copy()
+        data["sex"] = (data["sex"] == "female").astype(int)
+        data["age"] = data["age"].fillna(data["age"].median())
+        data["fare"] = data["fare"].fillna(data["fare"].median())
+        X = data.drop(columns="survived")
+        y = data["survived"]
+    - source: |
+        X_train = X_test = y_train = y_test = None  # TODO: stratified split
+        print(getattr(X_train, "shape", None))
+    - source: |
+        baseline_accuracy = None  # TODO
+        model_accuracy = None     # TODO: fit LogisticRegression on the training split
+        print(baseline_accuracy, model_accuracy)
+hints:
+  - "`train_test_split(X, y, test_size=0.25, random_state=42, stratify=y)`."
+  - "The baseline predicts the most frequent label in `y_test`."
+  - "Fit only on `X_train`; score on `X_test`."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 90
+  tests:
+    - id: split-shapes
+      description: the split is 668/223 and uses four features
+      code: |
+        assert X_train.shape == (668, 4), X_train.shape
+        assert X_test.shape == (223, 4), X_test.shape
+        assert len(y_train) == 668 and len(y_test) == 223
+    - id: baseline
+      description: majority-class accuracy is 0.614
+      code: |
+        assert abs(float(baseline_accuracy) - 0.614) < 0.01, baseline_accuracy
+    - id: model
+      description: the model beats the baseline but is not suspiciously perfect
+      code: |
+        assert 0.70 <= float(model_accuracy) <= 0.85, model_accuracy
+        assert float(model_accuracy) > float(baseline_accuracy)

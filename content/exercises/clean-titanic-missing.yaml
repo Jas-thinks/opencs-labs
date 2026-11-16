@@ -1,0 +1,71 @@
+slug: clean-titanic-missing
+title: Clean Missing Titanic Values
+topic: Data Cleaning
+difficulty: Medium
+position: 80
+estimated_minutes: 22
+datasets: [titanic]
+related_lesson: missing-values
+objective: Apply a documented missing-value strategy and preserve the information that a value was unknown.
+instructions:
+  markdown: |
+    Produce a cleaned copy of the Titanic table called `cleaned`:
+
+    * Drop the `deck` column (77% missing).
+    * Add a binary column `age_missing` (1 when age was originally missing).
+    * Fill missing `age` with the median age.
+    * Drop rows where `embarked` is missing.
+    * Leave no missing values in any remaining column.
+
+    Also produce `decision_log`, a DataFrame with columns `column`, `missing`, `strategy` and at least three rows.
+starter_notebook:
+  intro_markdown: |
+    # Clean Missing Titanic Values
+
+    **Objective:** make each missing-value decision explicit and verify the result.
+
+    Do not fill `age` with zero. Justify every choice in `decision_log`.
+  cells:
+    - source: |
+        import pandas as pd
+
+        df = pd.read_csv("/opt/opencs/datasets/titanic/v1/titanic.csv")
+        df.isna().sum().sort_values(ascending=False).head()
+    - source: |
+        cleaned = None  # TODO: start from df.copy()
+        print(cleaned)
+    - source: |
+        decision_log = None  # TODO: DataFrame with column/missing/strategy
+        print(decision_log)
+hints:
+  - "Start with `cleaned = df.copy()`, then `cleaned.drop(columns=[\"deck\"], inplace=True)`."
+  - "Create the indicator before filling: `cleaned[\"age_missing\"] = cleaned[\"age\"].isna().astype(int)`."
+  - "`cleaned = cleaned.dropna(subset=[\"embarked\"])` drops only the two affected rows."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 60
+  tests:
+    - id: shape
+      description: cleaned has 889 rows and no deck column
+      code: |
+        assert cleaned is not None
+        assert len(cleaned) == 889, len(cleaned)
+        assert "deck" not in cleaned.columns
+    - id: no-missing
+      description: no missing values remain
+      code: |
+        assert int(cleaned.isna().sum().sum()) == 0, cleaned.isna().sum()[cleaned.isna().sum() > 0]
+        assert "age_missing" in cleaned.columns
+        assert int(cleaned["age_missing"].sum()) == 177
+    - id: age-fill
+      description: age was filled with the median, not zero
+      code: |
+        assert abs(float(cleaned["age"].median()) - 28.0) < 0.01
+        assert float(cleaned["age"].min()) > 0
+    - id: decision-log
+      description: decision_log documents the strategy per column
+      code: |
+        assert decision_log is not None
+        assert {"column", "missing", "strategy"}.issubset(decision_log.columns)
+        assert len(decision_log) >= 3
+        assert "deck" in set(decision_log["column"])

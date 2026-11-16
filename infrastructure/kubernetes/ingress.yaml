@@ -1,0 +1,137 @@
+# OpenCS Labs -- single browser origin for app + API + JupyterHub.
+#
+#   https://opencs.example.edu/        -> opencs-frontend  (React bundle, nginx)
+#   https://opencs.example.edu/api     -> opencs-backend   (FastAPI, /api/v1/...)
+#   https://opencs.example.edu/hub     -> JupyterHub proxy (hub control routes)
+#   https://opencs.example.edu/user    -> JupyterHub proxy (single-user servers)
+#
+# One origin is a hard product requirement: the session cookie, the CSRF posture
+# and the `/user/<name>/lab` redirect all assume same-origin requests, so the
+# browser never needs CORS for the notebook path.
+#
+# ## Cross-namespace routing note
+# A Kubernetes Ingress can only reference Services in its OWN namespace. The
+# JupyterHub proxy (`proxy-public`) lives in `opencs-hub`, so we create an
+# ExternalName Service alias, `jupyterhub-proxy-public`, in `opencs` that points
+# at it, and reference the alias from the Ingress. ingress-nginx resolves an
+# ExternalName backend through cluster DNS at request time (the same mechanism
+# used to proxy external services), so the public Host header is preserved --
+# which is what JupyterHub expects once public_url/origin is
+# https://opencs.example.edu.
+#
+#   Verify after rollout:
+#     curl -sI https://opencs.example.edu/hub/hub/login   # expect 200/302
+#     kubectl -n ingress-nginx logs deploy/ingress-nginx-controller | grep -i externalname
+#
+#   If your ingress controller build refuses ExternalName backends, the
+#   equivalent configuration is a second Ingress object in `opencs-hub` for the
+#   same host with only the `/hub` and `/user` paths, plus a copy of the
+#   `opencs-tls` Secret in that namespace (TLS Secrets are namespace-scoped).
+#   ingress-nginx merges rules for the same host across Ingress objects, so the
+#   split must keep the path sets disjoint -- they are (`/`, `/api` here,
+#   `/hub`, `/user` there).
+#
+# ## Annotation prerequisites on the controller
+#   * `allow-snippet-annotations: "true"` in the ingress-nginx controller
+#     ConfigMap is required for `configuration-snippet` to take effect.
+#   * The snippet reuses `$connection_upgrade`, the map ingress-nginx already
+#     defines in its own template; it is not redefined here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: jupyterhub-proxy-public
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/name: jupyterhub-proxy
+    app.kubernetes.io/component: alias
+  annotations:
+    opencs.example.edu/note: >-
+      ExternalName alias for proxy-public.opencs-hub.svc.cluster.local so the
+      opencs Ingress can route /hub and /user to the JupyterHub proxy.
+      ExternalName Services have no ports: ingress-nginx uses the port from the
+      Ingress backend spec (80).
+spec:
+  type: ExternalName
+  externalName: proxy-public.opencs-hub.svc.cluster.local
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: opencs
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/name: opencs
+    app.kubernetes.io/component: ingress
+  annotations:
+    # --- General ---------------------------------------------------------
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+    nginx.ingress.kubernetes.io/proxy-buffers-number: "8"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    # Notebook sessions legitimately hold a request for a long time (kernel
+    # execution, long-poll on /hub/api/...), so read/send timeouts are 1 hour.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # --- WebSockets ------------------------------------------------------
+    # Modern ingress-nginx already forwards Upgrade/Connection for HTTP/1.1
+    # upstreams, but it only negotiates HTTP/1.1 when told to: the default for
+    # an upstream is derived from the client connection. Setting it explicitly
+    # keeps WebSocket terminals and kernel channels working when the client
+    # speaks HTTP/2 to the edge. The snippet re-asserts the upgrade headers so
+    # behaviour does not depend on ingress-nginx version defaults.
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection $connection_upgrade;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_set_header X-Forwarded-Host $host;
+      proxy_buffering off;
+    # --- TLS -------------------------------------------------------------
+    # cert-manager (or your certificate automation) materialises this Secret.
+    cert-manager.io/cluster-issuer: "letsencrypt-production"
+    # Redirect plain HTTP to HTTPS at the edge.
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - opencs.example.edu
+      secretName: opencs-tls
+  rules:
+    - host: opencs.example.edu
+      http:
+        paths:
+          # --- API (must be listed before "/" so the longest prefix wins) ---
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: opencs-backend
+                port:
+                  number: 80
+          # --- JupyterHub control plane + user servers ---------------------
+          - path: /hub
+            pathType: Prefix
+            backend:
+              service:
+                name: jupyterhub-proxy-public
+                port:
+                  number: 80
+          - path: /user
+            pathType: Prefix
+            backend:
+              service:
+                name: jupyterhub-proxy-public
+                port:
+                  number: 80
+          # --- React single-page application (catch-all) -------------------
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: opencs-frontend
+                port:
+                  number: 80

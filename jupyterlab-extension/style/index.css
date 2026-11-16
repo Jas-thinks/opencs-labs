@@ -1,0 +1,9 @@
+.opencs-catalogue {
+  color: var(--jp-ui-font-color1);
+  background: var(--jp-layout-color1);
+  font-size: var(--jp-ui-font-size1);
+}
+
+.opencs-catalogue-content button {
+  cursor: pointer;
+}

@@ -1,0 +1,25 @@
+{
+  "paths": [
+    {
+      "slug": "data-analysis",
+      "title": "Data Analysis & Data Science",
+      "description": "A beginner-first path from reading your first table to evaluating a boosted model. Every concept is paired with a real dataset, runnable code, and a notebook activity.",
+      "position": 1,
+      "modules": [
+        "introduction",
+        "python-for-data-analysis",
+        "numpy",
+        "pandas",
+        "data-cleaning",
+        "exploratory-data-analysis",
+        "data-visualization",
+        "statistics",
+        "machine-learning-fundamentals",
+        "regression-and-classification",
+        "trees-and-random-forest",
+        "xgboost",
+        "model-evaluation"
+      ]
+    }
+  ]
+}

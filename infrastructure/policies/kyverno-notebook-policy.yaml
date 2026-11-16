@@ -1,0 +1,297 @@
+# OpenCS Labs -- Kyverno admission guardrails for notebook pods.
+#
+# Scope: pods labelled `app=jupyterhub` in namespace `opencs-hub`, excluding the
+# Hub's own control-plane pods (which carry `component=hub`). That covers every
+# single-user notebook server KubeSpawner creates, i.e. exactly the pods that
+# execute untrusted student Python.
+#
+# What it enforces
+#   (a) every pod and container runs as non-root uid/gid 1000, no privilege
+#       escalation, all capabilities dropped, seccomp RuntimeDefault
+#   (b) no hostPath volume except the read-only dataset tree at
+#       /opt/opencs/datasets (canonical datasets live on a PVC; a hostPath is
+#       only permitted for clusters that materialise the tree node-locally)
+#   (c) no privileged containers, in containers, initContainers or
+#       ephemeralContainers
+#   (d) every container declares CPU and memory limits
+#   (e) the Kubernetes API token is not mounted into the pod
+#
+# All rules use `validationFailureAction: Enforce`: a violating pod is not
+# admitted, and KubeSpawner reports the spawn as failed rather than silently
+# starting an unsafe notebook. Background scanning is on so `PolicyReport`
+# objects record both passes and failures for auditing.
+#
+# Prerequisites:
+#   kyverno >= 1.11 (tested against 3.2.x)
+#   kubectl apply -f infrastructure/policies/kyverno-notebook-policy.yaml
+#
+# See infrastructure/policies/README.md for the enforcement model, the
+# accept/reject tests to run after applying, and the documented gaps.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: opencs-notebook-guardrails
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/component: policy
+  annotations:
+    policies.kyverno.io/title: "OpenCS notebook guardrails"
+    policies.kyverno.io/category: "Pod Security, OpenCS Labs"
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Non-root uid 1000, no privileged containers, hostPath limited to the
+      read-only dataset tree, mandatory resource limits and no API token for
+      every single-user notebook pod in opencs-hub.
+    # Exceptions are a security change and must be reviewed -- see
+    # infrastructure/policies/README.md.
+    policies.kyverno.io/subject: "Pod"
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    # ------------------------------------------------------------------
+    # (a) identity: non-root, uid/gid 1000, no privilege escalation
+    # ------------------------------------------------------------------
+    - name: require-nonroot-uid-1000
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - opencs-hub
+              selector:
+                matchLabels:
+                  app: jupyterhub
+                matchExpressions:
+                  # The Hub and proxy pods carry component=hub; they are managed
+                  # by the JupyterHub chart and keep their own profile.
+                  - key: component
+                    operator: NotIn
+                    values:
+                      - hub
+      validate:
+        message: >-
+          Notebook pods must run as non-root uid/gid 1000 with no privilege
+          escalation, all capabilities dropped and a RuntimeDefault seccomp
+          profile. Set securityContext: runAsNonRoot=true, runAsUser=1000,
+          runAsGroup=1000, fsGroup=1000, seccompProfile.type=RuntimeDefault in
+          the KubeSpawner profile.
+        # A pattern list with a single element requires EVERY element of the
+        # request array to match it, so this covers the notebook container and
+        # any sidecar. Values must be present and exact -- a security control
+        # that passes when the field is simply absent is not a control.
+        pattern:
+          spec:
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 1000
+              runAsGroup: 1000
+              seccompProfile:
+                type: RuntimeDefault
+            containers:
+              - securityContext:
+                  allowPrivilegeEscalation: false
+                  privileged: false
+                  capabilities:
+                    drop:
+                      - ALL
+
+    # ------------------------------------------------------------------
+    # (b) no hostPath volumes, except the read-only dataset tree
+    # ------------------------------------------------------------------
+    - name: forbid-hostpath-except-datasets
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - opencs-hub
+              selector:
+                matchLabels:
+                  app: jupyterhub
+                matchExpressions:
+                  - key: component
+                    operator: NotIn
+                    values:
+                      - hub
+      validate:
+        message: >-
+          hostPath volumes are forbidden in notebook pods, except
+          hostPath.path=/opt/opencs/datasets (the read-only dataset tree). Mount
+          datasets through the opencs-datasets PVC instead: a hostPath exposes
+          the node filesystem, /var/run/docker.sock, kubelet credentials and
+          other students' volumes to untrusted code.
+        # Only evaluate the deny block when the pod declares volumes at all, so
+        # an ordinary pod spec cannot trip a JMESPath null error.
+        preconditions:
+          all:
+            - key: "{{ request.object.spec.volumes || `[]` | length(@) }}"
+              operator: GreaterThan
+              value: 0
+        deny:
+          conditions:
+            any:
+              # Any hostPath volume whose path is not exactly the dataset tree.
+              # Volumes without a hostPath are filtered out by `hostPath != null`.
+              - key: >-
+                  {{ request.object.spec.volumes[?hostPath != null && hostPath.path != '/opt/opencs/datasets'] | length(@) }}
+                operator: GreaterThan
+                value: 0
+              # DirectoryOrCreate would let a notebook create directories on the
+              # node; Socket/BlockDevice/CharDevice expose host devices.
+              - key: >-
+                  {{ request.object.spec.volumes[?hostPath != null && hostPath.type != null].hostPath.type || `[]` }}
+                operator: AnyIn
+                value:
+                  - DirectoryOrCreate
+                  - Socket
+                  - BlockDevice
+                  - CharDevice
+              # Guard the well-known escape mounts even when they arrive as a
+              # PVC or emptyDir rather than a hostPath.
+              - key: "{{ request.object.spec.containers[].volumeMounts[].mountPath }}"
+                operator: AnyIn
+                value:
+                  - /var/run/docker.sock
+                  - /var/run/containerd/containerd.sock
+                  - /etc/kubernetes
+                  - /proc
+                  - /sys
+                  - /
+
+    # ------------------------------------------------------------------
+    # (c) no privileged containers anywhere in the pod
+    # ------------------------------------------------------------------
+    - name: forbid-privileged-containers
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - opencs-hub
+              selector:
+                matchLabels:
+                  app: jupyterhub
+                matchExpressions:
+                  - key: component
+                    operator: NotIn
+                    values:
+                      - hub
+      validate:
+        message: >-
+          Privileged containers and privilege escalation are forbidden in
+          notebook pods. A privileged container is a direct path to a node
+          escape from student code. Leave securityContext.privileged unset and
+          set allowPrivilegeEscalation=false.
+        deny:
+          conditions:
+            # NOTE ON JMESPath SYNTAX: a bare `true` in a JMESPath comparison is
+            # parsed as a field reference (which evaluates to null), NOT as the
+            # JSON boolean. `securityContext.privileged == true` therefore
+            # compares against null and matches every container that has no
+            # securityContext at all -- the exact opposite of intent. JSON
+            # literals must be backticked (`true`) and the parent null-guarded.
+            # Every condition below follows that form.
+            any:
+              - key: "{{ request.object.spec.containers[?securityContext != null && securityContext.privileged == `true`] | length(@) }}"
+                operator: GreaterThan
+                value: 0
+              - key: "{{ request.object.spec.initContainers[?securityContext != null && securityContext.privileged == `true`] | length(@) }}"
+                operator: GreaterThan
+                value: 0
+              - key: "{{ request.object.spec.ephemeralContainers[?securityContext != null && securityContext.privileged == `true`] | length(@) }}"
+                operator: GreaterThan
+                value: 0
+              - key: "{{ request.object.spec.containers[?securityContext != null && securityContext.allowPrivilegeEscalation == `true`] | length(@) }}"
+                operator: GreaterThan
+                value: 0
+              - key: "{{ request.object.spec.initContainers[?securityContext != null && securityContext.allowPrivilegeEscalation == `true`] | length(@) }}"
+                operator: GreaterThan
+                value: 0
+              # Capabilities that defeat the container boundary. `add` is only
+              # present when the pod explicitly asks for a capability.
+              - key: "{{ request.object.spec.containers[?securityContext != null && securityContext.capabilities != null && securityContext.capabilities.add != null].securityContext.capabilities.add[] }}"
+                operator: AnyIn
+                value:
+                  - SYS_ADMIN
+                  - SYS_PTRACE
+                  - SYS_MODULE
+                  - NET_ADMIN
+                  - DAC_READ_SEARCH
+                  - ALL
+
+    # ------------------------------------------------------------------
+    # (d) every container must declare CPU and memory limits
+    # ------------------------------------------------------------------
+    - name: require-resource-limits
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - opencs-hub
+              selector:
+                matchLabels:
+                  app: jupyterhub
+                matchExpressions:
+                  - key: component
+                    operator: NotIn
+                    values:
+                      - hub
+      preconditions:
+        any:
+          - key: "{{ request.object.spec.containers | length(@) }}"
+            operator: GreaterThan
+            value: 0
+      validate:
+        message: >-
+          Every notebook container must declare resources.limits.cpu,
+          resources.limits.memory and resources.limits.ephemeral-storage. Without
+          a limit, one runaway kernel can OOM or evict every neighbouring
+          student's session on the node.
+        foreach:
+          - list: "request.object.spec.containers"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.resources.limits.cpu || '' }}"
+                    operator: Equals
+                    value: ""
+                  - key: "{{ element.resources.limits.memory || '' }}"
+                    operator: Equals
+                    value: ""
+                  - key: "{{ element.resources.limits.\"ephemeral-storage\" || '' }}"
+                    operator: Equals
+                    value: ""
+
+    # ------------------------------------------------------------------
+    # (e) no Kubernetes API credentials inside a notebook pod
+    # ------------------------------------------------------------------
+    - name: require-no-serviceaccount-token
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - opencs-hub
+              selector:
+                matchLabels:
+                  app: jupyterhub
+                matchExpressions:
+                  - key: component
+                    operator: NotIn
+                    values:
+                      - hub
+      validate:
+        message: >-
+          Notebook pods must set automountServiceAccountToken=false. A projected
+          service-account token in a student pod is a live cluster credential
+          handed to untrusted code.
+        pattern:
+          spec:
+            automountServiceAccountToken: false

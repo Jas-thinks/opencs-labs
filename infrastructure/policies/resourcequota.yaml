@@ -1,0 +1,133 @@
+# OpenCS Labs -- notebook-plane capacity guardrails for namespace opencs-hub.
+#
+# Why this exists
+#   KubeSpawner creates one pod per active student. Without an aggregate cap, a
+#   burst of launches (the start of a lab session) would happily request more
+#   CPU and memory than the cluster has, and the scheduler would leave pods
+#   Pending with no clear signal. A ResourceQuota turns that into an explicit,
+#   immediate admission failure which JupyterHub/Spawner reports as a spawn
+#   error, and which the backend surfaces as "capacity full, retry".
+#
+# The arithmetic (450 concurrent single-user pods)
+# -------------------------------------------------
+#   Active-session ceiling          OPENCE_MAX_ACTIVE_SESSIONS = 450
+#                                   (target peak 400 + 50 launch headroom)
+#
+#   CPU requests    450 x 500m   = 225  CPU            -> requests.cpu: "225"
+#   Memory requests 450 x 2Gi    = 900  GiB            -> requests.memory: "900Gi"
+#   CPU limits      450 x 1      = 450  CPU            -> limits.cpu: "450"
+#   Memory limits   450 x 2Gi    = 900  GiB            -> limits.memory: "900Gi"
+#
+#   Why requests.memory is 900Gi and not 450Gi:
+#   the standard profile requests 1Gi and limits 2Gi (HLD 12.2). The quota is
+#   deliberately sized against the LIMIT envelope so that a student or admin who
+#   raises a pod's memory *request* to the limit value (2Gi) still schedules, and
+#   so that the sum of limits is itself bounded. Sizing requests at 450Gi would
+#   silently allow 900Gi of committed limits with no accounting.
+#
+#   Pods: 500 = 450 notebooks + 50 for the hub, the configurable HTTP proxy, the
+#   idle culler, and the transient overlap when a cull races a relaunch (a
+#   student reconnects while their old pod is still terminating, so two pods with
+#   the same name exist for a few seconds).
+#
+#   Ephemeral storage: 450 x 10Gi = 4500Gi = "4500Gi".
+#
+# These numbers describe a *ceiling*, not a procurement list. The cluster must
+# actually have this capacity for the ceiling to be reachable; validate with the
+# staged load test in HLD 12.7 before claiming 400-user capacity. If your nodes
+# are smaller, lower the ceiling here AND OPENCE_MAX_ACTIVE_SESSIONS together --
+# two different numbers is how you get students seeing 503s from the scheduler
+# instead of a clean "capacity full" message.
+#
+# Note on PriorityClass: hub/proxy pods count against this quota too. If the hub
+# must never be blocked by notebook pods, either give the namespace a second
+# quota scope or reserve headroom (the 50 pods above).
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: opencs-hub-quota
+  namespace: opencs-hub
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/component: quota
+spec:
+  hard:
+    # ---- compute -----------------------------------------------------
+    requests.cpu: "225"
+    requests.memory: "900Gi"
+    limits.cpu: "450"
+    limits.memory: "900Gi"
+    # ---- pod count ---------------------------------------------------
+    pods: "500"
+    # ---- storage -----------------------------------------------------
+    # Per-user home PVCs (5Gi each, KubeSpawner storage profile).
+    # 600 enrolled students x 5Gi = 3000Gi, capped at 3Ti so a runaway
+    # allocation cannot consume the whole storage class.
+    persistentvolumeclaims: "600"
+    requests.storage: "3000Gi"
+    # ---- object count ------------------------------------------------
+    # Every notebook pod also creates a Secret/ConfigMap/Service for its
+    # server; 2000 keeps room for 450 x 4 without permitting a leak to run
+    # unbounded.
+    count/secrets: "2000"
+    count/configmaps: "1000"
+    count/services: "600"
+---
+# Per-pod defaults and ceilings.
+#
+# The LimitRange is the backstop for the Kyverno rule `require-resource-limits`:
+# Kyverno rejects a container with no limits at all, and LimitRange supplies the
+# value when a spawn profile forgets one, plus a hard per-pod maximum so a
+# single notebook cannot request a whole node.
+#
+# Profiles come from HLD 12.2 (Standard 500m/1 / 1Gi/2Gi). The default here is
+# the Standard profile so an unlabelled spawn is safe rather than unbounded. The
+# maximum allows the Heavy profile (2 CPU / 4Gi request, 4 CPU / 8Gi limit) for
+# approved intensive work -- do not grant it by default.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: opencs-hub-limits
+  namespace: opencs-hub
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/component: quota
+spec:
+  limits:
+    - type: Container
+      # Applied only when the container does not specify them.
+      defaultRequest:
+        cpu: "500m"
+        memory: "1Gi"
+        ephemeral-storage: "2Gi"
+      default:
+        cpu: "1"
+        memory: "2Gi"
+        ephemeral-storage: "10Gi"
+      # Per-container floor: below this, JupyterLab plus a pandas kernel cannot
+      # start, so a request this small is always a mistake.
+      min:
+        cpu: "100m"
+        memory: "256Mi"
+      # Per-container ceiling: the Heavy profile. Anything above this needs a
+      # deliberate quota change and a review, not a spawn option.
+      max:
+        cpu: "4"
+        memory: "8Gi"
+        ephemeral-storage: "20Gi"
+      # Cap the limit:request ratio so a container cannot set a huge limit with
+      # a tiny request and become a node-level OOM candidate.
+      maxLimitRequestRatio:
+        cpu: "8"
+        memory: "8"
+    - type: Pod
+      # A single notebook pod may run the server plus a few kernels.
+      max:
+        cpu: "4"
+        memory: "8Gi"
+        ephemeral-storage: "20Gi"
+    - type: PersistentVolumeClaim
+      min:
+        storage: "1Gi"
+      max:
+        storage: "20Gi"

@@ -1,0 +1,69 @@
+slug: pandas-multi-agg-retail
+title: Multi-Column Aggregation on Retail Sales
+topic: Pandas
+difficulty: Hard
+position: 70
+estimated_minutes: 25
+datasets: [retail-sales]
+related_lesson: pandas-groupby-and-joins
+objective: Derive revenue, aggregate several metrics per country, and rank groups on a computed measure.
+instructions:
+  markdown: |
+    The retail sample contains invoice lines with `quantity` and `unit_price`.
+
+    1. Add a `revenue` column = `quantity * unit_price`.
+    2. Build `country_summary` grouped by `country` with:
+       * `invoices` — number of rows,
+       * `units` — total quantity,
+       * `revenue` — total revenue.
+    3. Set `top_country` to the country with the highest revenue.
+    4. Set `total_revenue` to the overall revenue across all rows.
+starter_notebook:
+  intro_markdown: |
+    # Multi-Column Aggregation on Retail Sales
+
+    **Objective:** combine a derived measure with a multi-metric groupby.
+
+    Some rows have negative quantities (returns). Keep them: the task is to
+    aggregate what is recorded, not to silently filter.
+  cells:
+    - source: |
+        import pandas as pd
+
+        retail = pd.read_csv("/opt/opencs/datasets/retail-sales/v1/online-retail-sample.csv")
+        retail.head()
+    - source: |
+        # TODO: retail["revenue"] = ...
+        print(retail.head())
+    - source: |
+        country_summary = None  # TODO: groupby country with named aggregations
+        print(country_summary.head())
+    - source: |
+        top_country = None   # TODO
+        total_revenue = None # TODO
+        print(top_country, total_revenue)
+hints:
+  - "Multiply the two columns directly: `retail[\"quantity\"] * retail[\"unit_price\"]`."
+  - "Use `.agg(invoices=(\"invoice_no\", \"count\"), units=(\"quantity\", \"sum\"), revenue=(\"revenue\", \"sum\"))`."
+  - "Sort or use `.revenue.idxmax()` to find the largest country."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 75
+  tests:
+    - id: revenue-derived
+      description: revenue equals quantity times unit_price on every row
+      code: |
+        assert "revenue" in retail.columns, "revenue column missing"
+        expected = retail["quantity"] * retail["unit_price"]
+        assert (retail["revenue"] - expected).abs().max() < 1e-6
+    - id: country-summary
+      description: country_summary has the required metrics and correct UK revenue
+      code: |
+        assert country_summary is not None
+        assert {"invoices", "units", "revenue"}.issubset(country_summary.columns)
+        assert abs(float(country_summary.loc["United Kingdom", "revenue"]) - 294981.24) < 1.0
+    - id: totals
+      description: total revenue and top country are correct
+      code: |
+        assert abs(float(total_revenue) - 351237.72) < 1.0, total_revenue
+        assert str(top_country) == "United Kingdom", top_country

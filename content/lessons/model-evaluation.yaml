@@ -1,0 +1,415 @@
+slug: model-evaluation
+title: Model Evaluation
+description: Confusion matrices, precision, recall, F1, ROC AUC, residuals, MAE and RMSE — measuring what actually matters.
+
+lessons:
+  - slug: classification-metrics
+    title: Classification Metrics
+    objective: Read a confusion matrix and choose precision, recall, F1 or ROC AUC for a given cost structure.
+    summary: Evaluate a Titanic classifier cell by cell and see why 78% accuracy can still miss a third of survivors.
+    estimated_minutes: 18
+    datasets: [titanic]
+    exercises: [metrics-titanic]
+    notebook_activity:
+      title: A confusion matrix in detail
+      intro_markdown: |
+        # Classification Metrics
+
+        Four numbers — true positives, false positives, true negatives and false
+        negatives — generate almost every classification metric. Start there.
+      cells:
+        - source: |
+            import pandas as pd
+            from sklearn.model_selection import train_test_split
+            from sklearn.linear_model import LogisticRegression
+            from sklearn.metrics import confusion_matrix, classification_report
+
+            df = pd.read_csv("/opt/opencs/datasets/titanic/v1/titanic.csv")
+            data = df[["survived", "pclass", "sex", "age", "fare", "sibsp", "parch"]].copy()
+            data["sex"] = (data["sex"] == "female").astype(int)
+            data["age"] = data["age"].fillna(data["age"].median())
+            data["fare"] = data["fare"].fillna(data["fare"].median())
+            X = data.drop(columns="survived"); y = data["survived"]
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42, stratify=y)
+            model = LogisticRegression(max_iter=500).fit(X_train, y_train)
+        - source: |
+            print(confusion_matrix(y_test, model.predict(X_test)))
+            print(classification_report(y_test, model.predict(X_test), digits=3))
+        - cell_type: markdown
+          source: |
+            ## Threshold trade-off
+
+            Lower the threshold: more predicted survivors, fewer missed survivors, but
+            more false alarms.
+        - source: |
+            for t in [0.3, 0.5, 0.7]:
+                pred = (model.predict_proba(X_test)[:, 1] >= t).astype(int)
+                print("threshold", t, "predicted survivors:", int(pred.sum()))
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                Our Titanic classifier is 78% accurate. That sounds decent until you see
+                *which* passengers it gets wrong: it misses 24 of 86 actual survivors.
+                For a safety-critical decision, that would be unacceptable regardless of
+                overall accuracy.
+            - type: table
+              caption: Confusion matrix for the held-out Titanic test set (223 passengers).
+              columns:
+                - {key: "", label: ""}
+                - {key: predicted_no, label: predicted did not survive}
+                - {key: predicted_yes, label: predicted survived}
+              rows:
+                - {"": "actual did not survive", predicted_no: 112, predicted_yes: 25}
+                - {"": "actual survived", predicted_no: 24, predicted_yes: 62}
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: markdown
+              text: |
+                From the four cells:
+
+                * **Accuracy** = (TP + TN) / all = 174 / 223 = 0.780.
+                * **Precision** = TP / (TP + FP) = 62 / 87 = 0.713 — when we predict survival, how often are we right?
+                * **Recall** = TP / (TP + FN) = 62 / 86 = 0.721 — of actual survivors, how many did we find?
+                * **F1** = harmonic mean of precision and recall = 0.717.
+                * **ROC AUC** = 0.843 — ranking quality across all thresholds.
+
+                Choose the metric from the cost of errors. Missing a survivor (false
+                negative) and falsely predicting survival (false positive) rarely cost
+                the same.
+            - type: callout
+              variant: warning
+              title: Accuracy is a trap on imbalanced data
+              text: |
+                Always predict "did not survive": 112 + 25 = 137 correct out of 223 =
+                61.4% accuracy, with recall 0. Accuracy alone would call that worse than
+                it is and better than it deserves.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              source: |
+                print(confusion_matrix(y_test, model.predict(X_test)))
+            - type: output
+              kind: text
+              text: |
+                [[112  25]
+                 [ 24  62]]
+            - type: markdown
+              text: |
+                Row 1: 112 correctly predicted non-survivors, 25 false alarms.
+                Row 2: 24 missed survivors, 62 correctly identified.
+                The off-diagonal cells are the two kinds of error.
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              caption: The full report.
+              source: |
+                from sklearn.metrics import classification_report
+
+                print(classification_report(y_test, model.predict(X_test), digits=3))
+            - type: output
+              kind: text
+              text: |
+                precision    recall  f1-score   support
+
+                0.824       0.818     0.821       137
+                0.713       0.721     0.717        86
+
+                accuracy                        0.780       223
+                macro avg   0.768     0.769     0.769       223
+                weighted avg 0.781    0.780     0.780       223
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: markdown
+              text: |
+                The threshold is a policy choice. Lowering it raises recall and lowers
+                precision; raising it does the opposite.
+            - type: table
+              caption: Effect of the decision threshold on counts.
+              columns:
+                - {key: threshold, label: threshold}
+                - {key: predicted_positive, label: predicted survivors}
+                - {key: reading, label: reading}
+              rows:
+                - {threshold: 0.3, predicted_positive: 109, reading: "higher recall, more false alarms"}
+                - {threshold: 0.5, predicted_positive: 87, reading: "default"}
+                - {threshold: 0.7, predicted_positive: 41, reading: "higher precision, more missed survivors"}
+            - type: chart
+              title: ROC curve summary
+              caption: AUC 0.843 means a randomly chosen survivor is ranked above a randomly chosen non-survivor 84.3% of the time.
+              spec:
+                type: line
+                x: fpr
+                y: tpr
+                data:
+                  - {fpr: 0.0, tpr: 0.0}
+                  - {fpr: 0.05, tpr: 0.35}
+                  - {fpr: 0.15, tpr: 0.62}
+                  - {fpr: 0.30, tpr: 0.76}
+                  - {fpr: 0.45, tpr: 0.84}
+                  - {fpr: 0.65, tpr: 0.91}
+                  - {fpr: 1.0, tpr: 1.0}
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: "Accuracy looks good but the important class is never predicted"
+                  explanation: The target is imbalanced and the metric rewards the majority.
+                  fix: Report per-class recall and precision; consider class weights or resampling.
+                - error: "Precision and recall are swapped in a report"
+                  explanation: Both are ratios of TP, but with different denominators.
+                  fix: Recall = TP / actual positives; precision = TP / predicted positives.
+                - error: "AUC is high but the chosen threshold performs poorly"
+                  explanation: AUC summarises ranking across thresholds, not one operating point.
+                  fix: Choose a threshold on validation data using the actual cost of errors.
+                - error: "Evaluating on the training set"
+                  explanation: Training metrics are optimistic and uninformative.
+                  fix: Evaluate on held-out or cross-validated predictions.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The exercise asks you to produce a confusion matrix and full metric
+                report, then justify a threshold for a stated cost structure.
+            - type: checklist
+              items:
+                - "I can build and read a confusion matrix."
+                - "I can compute precision and recall from the four cells."
+                - "I choose a metric that matches the cost of errors."
+                - "I select thresholds on validation data."
+      takeaways:
+        - The confusion matrix is the source of classification metrics.
+        - Precision and recall trade off against each other.
+        - Accuracy is misleading on imbalanced classes.
+        - ROC AUC measures ranking across thresholds, not a single decision.
+      glossary:
+        - term: True positive
+          definition: A positive instance correctly predicted positive.
+        - term: Precision
+          definition: Of predicted positives, the fraction that are correct.
+        - term: Recall
+          definition: Of actual positives, the fraction that were found.
+        - term: ROC AUC
+          definition: Probability that a random positive is ranked above a random negative.
+
+  - slug: regression-metrics
+    title: Regression Metrics and Residuals
+    objective: Evaluate a regression with R², MAE and RMSE, and use residuals to find where it fails.
+    summary: Measure California house-value predictions and explain why RMSE punishes large errors more than MAE.
+    estimated_minutes: 16
+    datasets: [california-housing]
+    exercises: [metrics-regression]
+    notebook_activity:
+      title: Measuring regression error
+      intro_markdown: |
+        # Regression Metrics
+
+        R² tells you how much variance you explain. MAE and RMSE tell you how
+        wrong your predictions are, in dollars. Use all three.
+      cells:
+        - source: |
+            import numpy as np, pandas as pd
+            from sklearn.model_selection import train_test_split
+            from sklearn.linear_model import LinearRegression
+            from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+
+            df = pd.read_csv("/opt/opencs/datasets/california-housing/v1/housing.csv")
+            X = df[["median_income", "housing_median_age", "total_rooms", "households"]]
+            y = df["median_house_value"]
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            model = LinearRegression().fit(X_train, y_train)
+            pred = model.predict(X_test)
+            print("R2  :", round(r2_score(y_test, pred), 3))
+            print("MAE :", round(mean_absolute_error(y_test, pred), 0))
+            print("RMSE:", round(np.sqrt(mean_squared_error(y_test, pred)), 0))
+        - cell_type: markdown
+          source: |
+            ## Residuals
+
+            A residual is observed minus predicted. Plotting residuals against
+            predictions reveals structure the metrics hide.
+        - source: |
+            residuals = y_test - pred
+            print("mean residual:", round(residuals.mean(), 0))
+            print("largest over-prediction:", round(residuals.min(), 0))
+            print("largest under-prediction:", round(residuals.max(), 0))
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                Our four-feature linear model on California housing reaches R² 0.524 on
+                held-out data, with MAE \$58,436 and RMSE \$78,994. The RMSE is much
+                larger than the MAE because squaring gives large errors much more
+                weight. That gap is a signal: some predictions are very wrong.
+            - type: table
+              caption: Held-out regression metrics.
+              columns:
+                - {key: metric, label: metric}
+                - {key: value, label: value}
+                - {key: meaning, label: meaning}
+              rows:
+                - {metric: R², value: "0.524", meaning: "explains 52.4% of variance"}
+                - {metric: MAE, value: "$58,436", meaning: "typical absolute error"}
+                - {metric: RMSE, value: "$78,994", meaning: "error weighted toward large misses"}
+                - {metric: "mean baseline R²", value: "0.000", meaning: "predicting the mean"}
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: markdown
+              text: |
+                * **MAE** — average absolute error. Same units as the target, easy to explain.
+                * **RMSE** — square root of mean squared error. Penalises large errors heavily.
+                * **R²** — variance explained relative to predicting the mean. Can be negative for a model worse than the mean.
+                * **Residual** — observed minus predicted. Structure in residuals means the model is missing something.
+
+                RMSE ≥ MAE always. A large ratio suggests a few very large errors.
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: code
+              language: python
+              source: |
+                import pandas as pd, numpy as np
+                from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+                residuals = y_test - pred
+                print("residual mean:", round(residuals.mean(), 1))
+                print("residual std :", round(residuals.std(), 1))
+                print("errors > $200k:", int((residuals.abs() > 200_000).sum()))
+            - type: output
+              kind: text
+              text: |
+                residual mean: 115.6
+                residual std : 79003.8
+                errors > $200k: 132
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              caption: Compute all three metrics explicitly.
+              source: |
+                import numpy as np
+                from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+
+                print("R2  :", round(r2_score(y_test, pred), 3))
+                print("MAE :", round(mean_absolute_error(y_test, pred), 0))
+                print("RMSE:", round(np.sqrt(mean_squared_error(y_test, pred)), 0))
+            - type: output
+              kind: text
+              text: |
+                R2  : 0.524
+                MAE : 58436.0
+                RMSE: 78994.0
+            - type: code
+              language: python
+              caption: Compare against the mean-prediction baseline.
+              source: |
+                baseline_pred = np.full_like(y_test, y_train.mean(), dtype=float)
+                print("baseline R2  :", round(r2_score(y_test, baseline_pred), 3))
+                print("baseline MAE :", round(mean_absolute_error(y_test, baseline_pred), 0))
+            - type: output
+              kind: text
+              text: |
+                baseline R2  : 0.0
+                baseline MAE : 90607.0
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: markdown
+              text: |
+                A residuals-versus-prediction plot should look like a shapeless cloud
+                around zero. Curvature or a fan shape means the linear model is missing
+                structure.
+            - type: chart
+              title: Error concentration
+              caption: Most errors are under $100k, but a long tail produces the large RMSE.
+              spec:
+                type: histogram
+                x: abs_error
+                bins: 20
+                data:
+                  - {abs_error: 2000}
+                  - {abs_error: 8000}
+                  - {abs_error: 15000}
+                  - {abs_error: 22000}
+                  - {abs_error: 30000}
+                  - {abs_error: 35000}
+                  - {abs_error: 42000}
+                  - {abs_error: 48000}
+                  - {abs_error: 55000}
+                  - {abs_error: 61000}
+                  - {abs_error: 70000}
+                  - {abs_error: 85000}
+                  - {abs_error: 110000}
+                  - {abs_error: 145000}
+                  - {abs_error: 200000}
+                  - {abs_error: 260000}
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: "R² is compared across datasets"
+                  explanation: R² depends on the target's variance in each dataset.
+                  fix: Compare R² only on the same target and split; use MAE to compare practical error.
+                - error: "RMSE is interpreted like MAE"
+                  explanation: RMSE is dominated by large errors and is always ≥ MAE.
+                  fix: Report both and inspect the error distribution.
+                - error: "Metrics are computed on the training set"
+                  explanation: Training error is optimistic.
+                  fix: Evaluate on held-out data or cross-validation.
+                - error: "The target is capped and the model is judged only by R²"
+                  explanation: Values at 500,001 cannot be predicted above the cap, creating systematic residuals.
+                  fix: Inspect residuals; consider censoring, a classification framing, or removing the cap deliberately.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The exercise asks you to evaluate a regression, identify the largest
+                residual segment, and explain what RMSE adds beyond MAE.
+            - type: checklist
+              items:
+                - "I can compute and interpret R², MAE and RMSE."
+                - "I compare against a mean-prediction baseline."
+                - "I inspect residuals for structure."
+                - "I know why RMSE and MAE disagree."
+      takeaways:
+        - R² measures explained variance; MAE and RMSE measure error magnitude.
+        - RMSE penalises large errors more strongly than MAE.
+        - Residual structure reveals model misspecification.
+        - Always compare against a trivial baseline.
+      glossary:
+        - term: MAE
+          definition: Mean absolute error.
+        - term: RMSE
+          definition: Root mean squared error.
+        - term: Residual
+          definition: Observed value minus predicted value.

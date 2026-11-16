@@ -1,0 +1,115 @@
+{{/*
+Prometheus monitoring objects.
+
+ServiceMonitor scrapes the backend's /metrics endpoint. PrometheusRule carries
+the alert set from infrastructure/monitoring/prometheus-rules.yaml, rendered
+here so a Helm install is self-contained.
+
+Both require the Prometheus Operator CRDs. If your cluster does not run the
+operator, set monitoring.serviceMonitor.enabled=false and
+monitoring.prometheusRule.enabled=false.
+*/}}
+{{- if and .Values.backend.enabled .Values.monitoring.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "opencs.fullname" . }}-backend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "opencs.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "opencs.fullname" . }}-backend
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  endpoints:
+    - port: http
+      path: {{ .Values.monitoring.serviceMonitor.path }}
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout }}
+{{- end }}
+{{- if .Values.monitoring.prometheusRule.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "opencs.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "opencs.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: opencs-api
+      rules:
+        - alert: OpenCSBackendDown
+          expr: up{job=~".*opencs.*backend.*"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "OpenCS backend is not being scraped"
+            description: "No backend replica has been reachable for 2 minutes. Login and the API are unavailable."
+        - alert: OpenCSHighErrorRate
+          expr: |
+            sum(rate(http_requests_total{job=~".*opencs.*backend.*",status=~"5.."}[5m]))
+              / clamp_min(sum(rate(http_requests_total{job=~".*opencs.*backend.*"}[5m])), 1) > 0.02
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "OpenCS backend 5xx rate above 2%"
+            description: "More than 2% of API requests are failing for 5 minutes."
+        - alert: OpenCSHighLatency
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(http_request_duration_seconds_bucket{job=~".*opencs.*backend.*"}[5m])) by (le)
+            ) > 1.0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "OpenCS API p95 latency above 1s"
+            description: "p95 request latency has exceeded 1 second for 10 minutes; well above the 400ms target."
+    - name: opencs-hub
+      rules:
+        - alert: OpenCSNotebookCapacityNear
+          expr: sum(jupyterhub_active_users) > 450 * 0.9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Notebook capacity above 90%"
+            description: "Active notebook servers are approaching OPENCE_MAX_ACTIVE_SESSIONS; new launches will start failing."
+        - alert: OpenCSNotebookSpawnFailing
+          expr: increase(jupyterhub_server_spawn_duration_seconds_count{status="failure"}[15m]) > 3
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Notebook spawns are failing"
+            description: "More than 3 spawn failures in 15 minutes; students cannot start notebooks."
+    - name: opencs-infra
+      rules:
+        - alert: OpenCSPostgresDown
+          expr: up{job=~".*postgres.*"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "PostgreSQL is down"
+            description: "Platform metadata is unavailable; the API will fail readiness."
+        - alert: OpenCSMinioDown
+          expr: up{job=~".*minio.*"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "MinIO is down"
+            description: "The canonical dataset store is unreachable; dataset sync will fail."
+{{- end }}

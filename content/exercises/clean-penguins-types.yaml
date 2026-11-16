@@ -1,0 +1,69 @@
+slug: clean-penguins-types
+title: Types and Outliers in Penguins
+topic: Data Cleaning
+difficulty: Medium
+position: 90
+estimated_minutes: 20
+datasets: [palmer-penguins]
+related_lesson: duplicates-types-outliers
+objective: Handle missing measurements and screen outliers with an explicit IQR rule.
+instructions:
+  markdown: |
+    Work with the Palmer penguins table.
+
+    Produce:
+
+    * `penguins_clean` — rows with a non-missing `body_mass_g`, with `body_mass_g` as a numeric dtype.
+    * `species_medians` — median body mass per species.
+    * `lower`, `upper` — the pooled IQR bounds (`Q1 - 1.5×IQR`, `Q3 + 1.5×IQR`).
+    * `n_outliers` — how many rows fall outside those bounds.
+starter_notebook:
+  intro_markdown: |
+    # Types and Outliers in Penguins
+
+    **Objective:** verify dtypes, handle missing measurements, and apply the IQR rule.
+
+    Note that the pooled rule may behave differently from a per-species rule.
+  cells:
+    - source: |
+        import pandas as pd
+
+        df = pd.read_csv("/opt/opencs/datasets/palmer-penguins/v1/penguins.csv")
+        print(df.dtypes)
+        print(df.isna().sum())
+    - source: |
+        penguins_clean = None  # TODO
+        species_medians = None  # TODO
+        print(species_medians)
+    - source: |
+        lower = None  # TODO
+        upper = None  # TODO
+        n_outliers = None  # TODO
+        print(lower, upper, n_outliers)
+hints:
+  - "`df.dropna(subset=[\"body_mass_g\"])` keeps rows with a measured mass."
+  - "`df[\"body_mass_g\"].quantile(0.25)` and `0.75` give the quartiles."
+  - "Count with `((mass < lower) | (mass > upper)).sum()`."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 60
+  tests:
+    - id: cleaned
+      description: penguins_clean has 342 rows and a numeric mass column
+      code: |
+        import pandas as pd
+        assert penguins_clean is not None
+        assert len(penguins_clean) == 342, len(penguins_clean)
+        assert pd.api.types.is_numeric_dtype(penguins_clean["body_mass_g"])
+        assert int(penguins_clean["body_mass_g"].isna().sum()) == 0
+    - id: medians
+      description: species medians match the data
+      code: |
+        assert int(species_medians.loc["Adelie"]) == 3700
+        assert int(species_medians.loc["Gentoo"]) == 5000
+    - id: iqr
+      description: IQR bounds and pooled outlier count are correct
+      code: |
+        assert abs(float(lower) - 2625.0) < 0.1, lower
+        assert abs(float(upper) - 5875.0) < 0.1, upper
+        assert int(n_outliers) == 0, n_outliers

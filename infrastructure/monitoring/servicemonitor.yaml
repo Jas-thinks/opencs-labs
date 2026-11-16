@@ -1,0 +1,92 @@
+# OpenCS Labs -- ServiceMonitor objects for the Prometheus Operator.
+#
+# Requires the Prometheus Operator (kube-prometheus-stack) and its
+# ServiceMonitor CRD. The `release` label must match the Prometheus resource's
+# `serviceMonitorSelector`; adjust it to your stack's release name.
+#
+#   kubectl apply -f infrastructure/monitoring/servicemonitor.yaml
+#   kubectl -n opencs get servicemonitor
+#   # Then confirm the target is UP in Prometheus:
+#   #   status -> targets -> job="opencs-backend"
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: opencs-backend
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/name: opencs-backend
+    app.kubernetes.io/component: monitoring
+    release: kube-prometheus-stack
+spec:
+  # Select the backend Service (which selects the Deployment's pods).
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opencs-backend
+  namespaceSelector:
+    matchNames:
+      - opencs
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      scheme: http
+      # Deduplicate when two replicas are scraped: the ServiceMonitor target is
+      # per-pod, but `honorLabels: false` keeps Pod labels out of the series so
+      # the API alerts aggregate across replicas cleanly.
+      honorLabels: false
+      relabelings:
+        # Keep the pod name for per-replica debugging without adding it to every
+        # series by default.
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+          action: replace
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+          action: replace
+---
+# JupyterHub exposes its own Prometheus metrics at /hub/metrics (hub side) and
+# the chart can also scrape the proxy. Enable this when the Hub is deployed with
+# metrics turned on; otherwise the target will simply never appear.
+#
+# The hub Service is created by the Zero to JupyterHub chart in opencs-hub.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: opencs-jupyterhub
+  namespace: opencs-hub
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/name: jupyterhub
+    app.kubernetes.io/component: monitoring
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      # Zero to JupyterHub labels the hub Service `app: jupyterhub` /
+      # `component: hub`; `app.kubernetes.io/name: jupyterhub` is present on
+      # chart >= 3.x. Verify with:
+      #   kubectl -n opencs-hub get svc hub --show-labels
+      app.kubernetes.io/name: jupyterhub
+      app.kubernetes.io/component: hub
+  namespaceSelector:
+    matchNames:
+      - opencs-hub
+  endpoints:
+    - port: hub
+      path: /hub/metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      scheme: http
+      honorLabels: false
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+          action: replace
+# NOTE ON NOTEBOOK PODS
+#   KubeSpawner single-user pods do not expose Prometheus metrics, so there is
+#   deliberately no third ServiceMonitor here. Notebook health is observed
+#   through kube-state-metrics (pod phase, restarts) and the backend's own
+#   opencs_active_notebook_sessions gauge; the alerts in prometheus-rules.yaml
+#   use kube_pod_status_phase and that gauge.

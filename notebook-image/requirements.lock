@@ -1,0 +1,56 @@
+# OpenCS Labs -- pinned analytics image lock file.
+#
+# Image: opencs/analytics:1.0.0
+# Python: 3.12 (Debian slim base, python:3.12-slim)
+#
+# Every version below is pinned with `==` for reproducibility: a student notebook
+# that runs on one deployment must run identically on every deployment, and the
+# grading sandbox must produce the same verdict as the notebook. Do not edit this
+# file by hand beyond regenerating it; change requirements.in and re-lock.
+#
+# This lock carries no artifact hashes. Hashes are a supply-chain control that
+# belongs to the CI pipeline that builds and records the image digest (see
+# HLD.md 11.2 "Record image tag and digest"); pinning the exact versions here is
+# what makes the environment itself reproducible.
+#
+# Regenerate (from notebook-image/):
+#   python -m venv /tmp/lock && /tmp/lock/bin/pip install pip-tools
+#   /tmp/lock/bin/pip-compile --generate-hashes=false requirements.in \
+#       --output-file requirements.lock
+#   # then restore this header block
+#
+# Verify the pins still resolve for Python 3.12 before committing:
+#   docker run --rm -v "$PWD:/w:ro" python:3.12-slim \
+#       pip install --dry-run -r /w/requirements.lock
+#   pytest smoke-tests -q      # via build.sh
+
+# --- Jupyter stack ---------------------------------------------------------
+jupyterlab==4.6.6
+ipykernel==6.31.0
+# jupyterhub supplies the `jupyterhub-singleuser` entrypoint. The Hub proxies
+# /user/<name>/ to this server and validates its API token, so the package must
+# be present *inside* the single-user image; without it the Hub cannot
+# authenticate a contents request and every notebook write returns 403/500.
+jupyterhub==4.1.5
+
+# --- Core data stack -------------------------------------------------------
+numpy==2.5.5
+pandas==3.1.1
+matplotlib==3.11.2
+seaborn==0.13.2
+plotly==7.1.0
+scipy==1.18.1
+statsmodels==0.15.0
+scikit-learn==1.9.1
+xgboost==3.4.1
+
+# --- Tabular IO / storage drivers -----------------------------------------
+openpyxl==3.1.5
+pyarrow==26.0.1
+fastparquet==2026.9.0
+sqlalchemy==2.0.57
+
+# --- Test tooling ----------------------------------------------------------
+# The smoke tests are mounted read-only at runtime, so the runner must already
+# be in the image; nothing is installed at container start.
+pytest==9.2.0

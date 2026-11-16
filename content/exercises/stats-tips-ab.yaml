@@ -1,0 +1,69 @@
+slug: stats-tips-ab
+title: Did Smokers Tip Differently?
+topic: Statistics
+difficulty: Hard
+position: 140
+estimated_minutes: 25
+datasets: [tips]
+related_lesson: hypothesis-testing
+objective: Run a two-sample test, report the effect size and write a correct plain-language conclusion.
+instructions:
+  markdown: |
+    Compare tips from smokers and non-smokers in the tips table.
+
+    Produce:
+
+    * `t_stat` — Welch's t statistic.
+    * `p_value` — the two-sided p-value.
+    * `mean_diff` — mean tip for smokers minus mean tip for non-smokers.
+    * `conclusion` — a sentence that states whether the data provide evidence of a difference and mentions the effect size.
+
+    Use `scipy.stats.ttest_ind(..., equal_var=False)`.
+starter_notebook:
+  intro_markdown: |
+    # Did Smokers Tip Differently?
+
+    **Objective:** test a hypothesis, then interpret the result honestly.
+
+    Remember that a large p-value is not proof of no difference.
+  cells:
+    - source: |
+        import pandas as pd
+        from scipy import stats
+
+        df = pd.read_csv("/opt/opencs/datasets/tips/v1/tips.csv")
+        yes = df[df["smoker"] == "Yes"]["tip"]
+        no = df[df["smoker"] == "No"]["tip"]
+        print(len(yes), len(no))
+    - source: |
+        result = stats.ttest_ind(yes, no, equal_var=False)
+        t_stat = None   # TODO
+        p_value = None  # TODO
+        mean_diff = None  # TODO
+        print(t_stat, p_value, mean_diff)
+    - source: |
+        conclusion = ""  # TODO: one or two sentences
+        print(conclusion)
+hints:
+  - "The result object has `.statistic` and `.pvalue`."
+  - "`yes.mean() - no.mean()` gives the effect in dollars."
+  - "With p ≈ 0.93, the data are compatible with no difference. Say that explicitly."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 60
+  tests:
+    - id: test-statistic
+      description: t statistic and p-value match the data
+      code: |
+        assert abs(float(t_stat) - 0.092) < 0.05, t_stat
+        assert abs(float(p_value) - 0.927) < 0.03, p_value
+    - id: effect
+      description: mean difference is about 1.7 cents
+      code: |
+        assert abs(float(mean_diff) - 0.017) < 0.01, mean_diff
+    - id: conclusion
+      description: conclusion states no evidence and mentions effect size
+      code: |
+        text = str(conclusion).lower()
+        assert "no evidence" in text or "not significant" in text, conclusion
+        assert any(term in text for term in ["small", "1.7", "cent", "effect size", "negligible"]), conclusion

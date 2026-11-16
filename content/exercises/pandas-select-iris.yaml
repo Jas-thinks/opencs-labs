@@ -1,0 +1,70 @@
+slug: pandas-select-iris
+title: Select and Derive in Iris
+topic: Pandas
+difficulty: Medium
+position: 50
+estimated_minutes: 18
+datasets: [iris]
+related_lesson: pandas-series-and-dataframes
+objective: Filter rows with a boolean condition, copy safely and derive a new column.
+instructions:
+  markdown: |
+    Start from the iris table.
+
+    Produce:
+
+    * `long` — a DataFrame containing only flowers with `petal_length > 5`, created with `.copy()`.
+    * `long` must contain an extra column `petal_area` = `petal_length * petal_width`.
+    * `max_area` — the largest `petal_area` in `long`.
+    * `n_long` — the number of rows in `long`.
+starter_notebook:
+  intro_markdown: |
+    # Select and Derive in Iris
+
+    **Objective:** filter, copy, derive and summarise without modifying the original table.
+  cells:
+    - source: |
+        import pandas as pd
+
+        df = pd.read_csv("/opt/opencs/datasets/iris/v1/iris.csv")
+        print(df.shape)
+        df.head()
+    - cell_type: markdown
+      source: |
+        ## Filter and copy
+
+        Filter first. Add `.copy()` so the new column does not touch `df`.
+    - source: |
+        long = None  # TODO
+        print(long)
+    - source: |
+        # TODO: create long["petal_area"]
+        max_area = None  # TODO
+        n_long = None    # TODO
+        print(max_area, n_long)
+hints:
+  - "`df[df[\"petal_length\"] > 5].copy()` returns an independent filtered frame."
+  - "Assigning a new column: `long[\"petal_area\"] = long[\"petal_length\"] * long[\"petal_width\"]`."
+  - "`max()` and `len()` give the last two answers."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 60
+  tests:
+    - id: filtered-frame
+      description: long has 42 rows and retains the source columns
+      code: |
+        assert long is not None
+        assert len(long) == 42, len(long)
+        for column in ["sepal_length", "petal_length", "petal_width", "species"]:
+            assert column in long.columns
+    - id: derived-column
+      description: petal_area equals length times width
+      code: |
+        assert "petal_area" in long.columns, "petal_area missing"
+        assert abs(float(long["petal_area"].iloc[0]) - (long["petal_length"].iloc[0] * long["petal_width"].iloc[0])) < 1e-9
+        assert abs(float(max_area) - 15.87) < 0.05
+    - id: row-count
+      description: n_long is 42
+      code: |
+        assert int(n_long) == 42
+        assert len(df) == 150, "the original df must not be filtered in place"

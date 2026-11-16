@@ -1,0 +1,5 @@
+node_modules/
+lib/
+opencs_jupyterlab_datasets/
+tsconfig.tsbuildinfo
+*.tgz

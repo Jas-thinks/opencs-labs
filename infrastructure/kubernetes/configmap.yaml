@@ -1,0 +1,76 @@
+# OpenCS Labs -- non-secret application configuration.
+#
+# Every key is read by the backend through pydantic-settings, which prefixes
+# environment variables with `OPENCE_` (see backend/app/core/config.py).
+# Secrets live in `opencs-secrets` (see secret.example.yaml) and are injected
+# via envFrom alongside this ConfigMap.
+#
+# Changing a value here does not restart pods: run
+#   kubectl -n opencs rollout restart deploy/opencs-backend
+# after updating the ConfigMap.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opencs-config
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+    app.kubernetes.io/name: opencs-backend
+    app.kubernetes.io/component: api
+data:
+  # --- Required deployment contract ---------------------------------------
+  OPENCE_ENV: "production"
+  OPENCE_API_PREFIX: "/api/v1"
+  # Single browser origin that fronts the React app, the API and JupyterHub.
+  OPENCE_PUBLIC_ORIGIN: "https://opencs.example.edu"
+  # Browser-facing Hub URL (users are redirected here for notebook access).
+  OPENCE_JUPYTERHUB_URL: "https://opencs.example.edu"
+  # Hub REST API, reachable only inside the cluster (hub Service, port 8081).
+  OPENCE_JUPYTERHUB_API_URL: "http://hub.opencs-hub.svc.cluster.local:8081/hub/api"
+  OPENCE_JUPYTERHUB_PUBLIC_URL: "https://opencs.example.edu"
+  OPENCE_NOTEBOOK_BACKEND: "hub"
+  # Path where the read-only dataset tree is mounted inside notebook pods.
+  OPENCE_DATASET_MOUNT_PATH: "/opt/opencs/datasets"
+  # Path the backend reads the same tree from (mounted from the opencs-datasets PVC).
+  OPENCE_DATASET_SERVING_DIR: "/opt/opencs/datasets"
+  OPENCE_ENVIRONMENT_IMAGE: "opencs/analytics:1.0.0"
+  # 450 hard ceiling: 400 target peak plus 50 sessions of launch headroom.
+  OPENCE_MAX_ACTIVE_SESSIONS: "450"
+  OPENCE_RATE_LIMIT_ENABLED: "true"
+  # --- Grading sandbox ------------------------------------------------------
+  # `kubernetes` runs each evaluation as a short-lived batch/v1 Job in the
+  # dedicated `opencs-grading` namespace (see grading-namespace.yaml): no
+  # service-account token, read-only root, all capabilities dropped, DNS-only
+  # egress and a hard ResourceQuota.
+  #
+  # `docker` is the dev/compose path and needs a Docker daemon. This pod is
+  # hardened (readOnlyRootFilesystem, no docker socket), so `docker` cannot work
+  # here; mounting /var/run/docker.sock into the API pod would also hand
+  # root-equivalent node access to the request path. Production startup
+  # validation rejects `docker` for that reason.
+  OPENCE_GRADER: "kubernetes"
+  OPENCE_GRADER_K8S_NAMESPACE: "opencs-grading"
+  OPENCE_GRADER_DATASET_PVC: "opencs-datasets"
+
+  # --- Additional settings required for a healthy production boot (backend
+  #     app.core.config.Settings.validate_runtime() refuses to start when these
+  #     are missing or left at development defaults) ------------------------
+  # Session cookies must be Secure-only when the origin is HTTPS.
+  OPENCE_COOKIE_SECURE: "true"
+  # `dev` password authentication is rejected in production; use the
+  # institutional OIDC provider. The client secret lives in opencs-secrets.
+  OPENCE_AUTH_MODE: "oidc"
+  OPENCE_OIDC_ISSUER: "https://idp.example.edu/realms/opencs"
+  # MinIO is S3-compatible and is addressed by the `minio` Service in-namespace.
+  OPENCE_S3_ENDPOINT: "http://minio.opencs.svc.cluster.local:9000"
+  OPENCE_S3_BUCKET: "opencs-datasets"
+  OPENCE_S3_REGION: "us-east-1"
+  # Grading sandbox uses the same pinned environment as student notebooks.
+  OPENCE_GRADER_IMAGE: "opencs/analytics:1.0.0"
+  OPENCE_GRADER_TIMEOUT_SECONDS: "90"
+  OPENCE_GRADER_MEMORY: "1g"
+  OPENCE_GRADER_CPUS: "1"
+  # Launch / evaluation rate limits per principal per minute.
+  OPENCE_RATE_LIMIT_LAUNCH_PER_MINUTE: "10"
+  OPENCE_RATE_LIMIT_EVALUATE_PER_MINUTE: "6"
+  OPENCE_NOTEBOOK_START_TIMEOUT_SECONDS: "120"

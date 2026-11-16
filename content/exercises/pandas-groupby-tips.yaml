@@ -1,0 +1,58 @@
+slug: pandas-groupby-tips
+title: GroupBy on Restaurant Bills
+topic: Pandas
+difficulty: Easy
+position: 60
+estimated_minutes: 15
+datasets: [tips]
+related_lesson: pandas-groupby-and-joins
+objective: Produce a named aggregation with counts and means, then identify the highest group.
+instructions:
+  markdown: |
+    Summarise the tips table by day.
+
+    Produce:
+
+    * `summary` — a DataFrame indexed by `day` with columns `bills` (count), `avg_bill` (mean total_bill) and `avg_tip` (mean tip).
+    * `best_day` — the day with the highest `avg_bill`.
+starter_notebook:
+  intro_markdown: |
+    # GroupBy on Restaurant Bills
+
+    **Objective:** split → apply → combine, with readable output column names.
+  cells:
+    - source: |
+        import pandas as pd
+
+        df = pd.read_csv("/opt/opencs/datasets/tips/v1/tips.csv")
+        df.head()
+    - source: |
+        summary = None  # TODO: named aggregation grouped by day
+        print(summary)
+    - source: |
+        best_day = None  # TODO
+        print(best_day)
+hints:
+  - "Start with `df.groupby(\"day\")`."
+  - "Use `.agg(bills=(\"total_bill\", \"count\"), ...)` for named columns."
+  - "`summary[\"avg_bill\"].idxmax()` returns the day label."
+evaluation:
+  type: python_assertions
+  timeout_seconds: 60
+  tests:
+    - id: shape
+      description: summary has four rows and the three required columns
+      code: |
+        assert summary is not None
+        assert len(summary) == 4
+        assert set(["bills", "avg_bill", "avg_tip"]).issubset(summary.columns)
+    - id: values
+      description: Sunday counts and averages match the data
+      code: |
+        assert int(summary.loc["Sun", "bills"]) == 76
+        assert abs(float(summary.loc["Sun", "avg_bill"]) - 21.41) < 0.05
+        assert abs(float(summary.loc["Fri", "avg_tip"]) - 2.73) < 0.1
+    - id: best-day
+      description: best_day is Sunday
+      code: |
+        assert str(best_day) == "Sun", best_day

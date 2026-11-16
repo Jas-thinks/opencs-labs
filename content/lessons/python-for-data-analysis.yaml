@@ -1,0 +1,210 @@
+slug: python-for-data-analysis
+title: Python for Data Analysis
+description: The Python you need for analysis — collections, functions, comprehensions and vectorised column arithmetic.
+
+lessons:
+  - slug: python-essentials-for-analysis
+    title: Python Essentials for Analysis
+    objective: Write small Python programs that transform tabular data using lists, dictionaries, functions and vectorised pandas operations.
+    summary: Build a tip-percentage column three ways and see why vectorised pandas code is clearer and faster than row loops.
+    estimated_minutes: 15
+    datasets: [tips]
+    exercises: [python-vectorise-tips]
+    notebook_activity:
+      title: From loops to vectorised columns
+      intro_markdown: |
+        # Python Essentials for Analysis
+
+        You will compute a tip percentage for every bill three ways: a list, a
+        loop, and a vectorised pandas expression. The results must match — the
+        final form is the one you should use in real analysis.
+      cells:
+        - source: |
+            import pandas as pd
+
+            df = pd.read_csv("/opt/opencs/datasets/tips/v1/tips.csv")
+            total_bills = df["total_bill"].tolist()
+            tips = df["tip"].tolist()
+            print(total_bills[:5])
+        - source: |
+            tip_pct = [tip / bill * 100 for tip, bill in zip(tips, total_bills)]
+            print([round(value, 2) for value in tip_pct[:5]])
+        - cell_type: markdown
+          source: |
+            ## The vectorised form
+
+            No loop is needed: pandas applies the arithmetic to the whole column.
+        - source: |
+            df["tip_pct"] = df["tip"] / df["total_bill"] * 100
+            print(df[["total_bill", "tip", "tip_pct"]].head().round(2))
+        - cell_type: markdown
+          source: |
+            ## Filter and aggregate
+
+            Which day has the highest median tip percentage?
+        - source: |
+            df.groupby("day")["tip_pct"].median().sort_values(ascending=False).round(2)
+    content:
+      stages:
+        - key: explore
+          label: Explore
+          blocks:
+            - type: markdown
+              text: |
+                Analysis code is mostly four operations: **select**, **filter**,
+                **derive**, **aggregate**. Python's built-in collections are enough to
+                understand them; pandas makes them fast and readable on whole columns.
+
+                We will use `total_bill` and `tip` from the tips dataset.
+            - type: code
+              language: python
+              source: |
+                bills = [16.99, 10.34, 21.01]
+                tips = [1.01, 1.66, 3.50]
+
+                tip_pct = [tip / bill * 100 for tip, bill in zip(bills, tips)]
+                print([round(value, 2) for value in tip_pct])
+            - type: output
+              kind: text
+              text: "[5.94, 16.05, 16.66]"
+
+        - key: understand
+          label: Understand
+          blocks:
+            - type: steps
+              items:
+                - title: Select
+                  text: Pick one column — `df["total_bill"]`.
+                - title: Filter
+                  text: Keep rows matching a condition — `df[df["size"] >= 4]`.
+                - title: Derive
+                  text: Create a new column — `df["tip_pct"] = df["tip"] / df["total_bill"] * 100`.
+                - title: Aggregate
+                  text: Reduce to a summary — `df.groupby("day")["tip_pct"].median()`.
+            - type: markdown
+              text: |
+                A **function** packages a transformation so you can name it and test it.
+                Keep functions small and free of hidden global state.
+            - type: code
+              language: python
+              source: |
+                def tip_percent(total: float, tip: float) -> float:
+                    """Return the tip as a percentage of the bill."""
+                    if total <= 0:
+                        raise ValueError("total must be positive")
+                    return tip / total * 100
+
+                print(round(tip_percent(16.99, 1.01), 2))
+            - type: output
+              kind: text
+              text: "5.95"
+
+        - key: inspect
+          label: Inspect
+          blocks:
+            - type: markdown
+              text: |
+                Before transformation, inspect the objects you are working with:
+                `type(obj)` tells you what it is; `dir(obj)` lists its methods;
+                `len(obj)` tells you how many items it holds.
+            - type: code
+              language: python
+              source: |
+                import pandas as pd
+
+                df = pd.read_csv("/opt/opencs/datasets/tips/v1/tips.csv")
+                print(type(df))
+                print(df.shape)
+                print(df["total_bill"].head(3).tolist())
+            - type: output
+              kind: text
+              text: |
+                <class 'pandas.core.frame.DataFrame'>
+                (244, 7)
+                [16.99, 10.34, 21.01]
+
+        - key: execute
+          label: Execute
+          blocks:
+            - type: code
+              language: python
+              caption: The same derivation as a vectorised column.
+              source: |
+                df["tip_pct"] = df["tip"] / df["total_bill"] * 100
+                print(df[["total_bill", "tip", "tip_pct"]].head().round(2))
+            - type: output
+              kind: table
+              columns:
+                - {key: total_bill, label: total_bill}
+                - {key: tip, label: tip}
+                - {key: tip_pct, label: tip_pct}
+              rows:
+                - {total_bill: 16.99, tip: 1.01, tip_pct: 5.94}
+                - {total_bill: 10.34, tip: 1.66, tip_pct: 16.05}
+                - {total_bill: 21.01, tip: 3.5, tip_pct: 16.66}
+                - {total_bill: 23.68, tip: 3.31, tip_pct: 13.98}
+                - {total_bill: 24.59, tip: 3.61, tip_pct: 14.68}
+            - type: callout
+              variant: tip
+              title: Prefer expressions over loops
+              text: |
+                Vectorised code is shorter, less error-prone, and much faster on large
+                tables. Use `.apply()` only when a transformation truly cannot be
+                expressed with column arithmetic.
+
+        - key: visualize
+          label: Visualize
+          blocks:
+            - type: chart
+              title: Median tip percentage by day
+              caption: Sunday has the highest median tip percentage (16.11%); Saturday the lowest (15.18%).
+              spec:
+                type: bar
+                x: day
+                y: median_tip_pct
+                data:
+                  - {day: Fri, median_tip_pct: 15.56}
+                  - {day: Sat, median_tip_pct: 15.18}
+                  - {day: Sun, median_tip_pct: 16.11}
+                  - {day: Thur, median_tip_pct: 15.38}
+
+        - key: debug
+          label: Debug
+          blocks:
+            - type: mistakes
+              items:
+                - error: "`SettingWithCopyWarning` when assigning a new column"
+                  explanation: You filtered a DataFrame and pandas is unsure whether you modified a view or a copy.
+                  fix: Make the copy explicit — `subset = df[df["size"] > 2].copy()`.
+                - error: "`ZeroDivisionError` on some bills"
+                  explanation: A zero or missing bill makes the ratio undefined.
+                  fix: Guard the denominator, or use `df["tip"].div(df["total_bill"].replace(0, pd.NA))`.
+                - error: "A function returns `None` unexpectedly"
+                  explanation: The function prints the result instead of returning it.
+                  fix: Use `return`, not `print`, inside reusable functions.
+
+        - key: practice
+          label: Practice
+          blocks:
+            - type: markdown
+              text: |
+                The practice exercise gives you a loop implementation and asks you to
+                replace it with vectorised pandas code, then verify both agree.
+            - type: checklist
+              items:
+                - "I can select, filter, derive and aggregate with pandas."
+                - "I can write a small function with a clear contract."
+                - "I know why vectorised column arithmetic is preferred."
+                - "I can make an explicit copy before modifying a filtered table."
+      takeaways:
+        - Most analysis code is select → filter → derive → aggregate.
+        - Vectorised operations replace row loops and are easier to verify.
+        - Small named functions make transformations testable.
+        - Explicit `.copy()` avoids ambiguous view/copy behaviour.
+      glossary:
+        - term: Vectorised
+          definition: An operation applied to a whole array or column at once.
+        - term: List comprehension
+          definition: A compact expression that builds a list from an iterable.
+        - term: Method chaining
+          definition: Calling successive operations on the result of the previous one.

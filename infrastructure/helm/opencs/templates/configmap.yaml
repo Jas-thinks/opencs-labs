@@ -1,0 +1,28 @@
+{{- $component := printf "%s-config" (include "opencs.fullname" .) -}}
+{{- /*
+Non-secret application configuration. Every key becomes an OPENCE_* environment
+variable consumed by backend/app/core/config.py, which the Deployment injects
+with envFrom (so a change here only takes effect after the pods restart -- the
+Deployment carries a checksum/config annotation that forces exactly that).
+
+.Values.global.origin is authoritative for the public URL keys so that a single
+`--set global.origin=...` cannot leave the API with a stale origin.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $component }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "opencs.componentLabels" (dict "root" . "component" (printf "%s-backend" (include "opencs.fullname" .))) | nindent 4 }}
+    app.kubernetes.io/component: config
+data:
+  OPENCE_PUBLIC_ORIGIN: {{ .Values.global.origin | quote }}
+  OPENCE_JUPYTERHUB_URL: {{ .Values.global.origin | quote }}
+  OPENCE_JUPYTERHUB_PUBLIC_URL: {{ .Values.global.origin | quote }}
+  {{- range $key, $value := .Values.backend.config }}
+  {{- /* Do not let a stale values.yaml origin override global.origin. */}}
+  {{- if not (has $key (list "OPENCE_PUBLIC_ORIGIN" "OPENCE_JUPYTERHUB_URL" "OPENCE_JUPYTERHUB_PUBLIC_URL")) }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+  {{- end }}

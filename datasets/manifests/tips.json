@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "dataset_id": "tips",
+  "slug": "tips",
+  "title": "Restaurant Tips",
+  "category": "GroupBy",
+  "summary": "244 restaurant bills with tip, day, time and party size.",
+  "description": "A small, readable table for learning groupby, aggregation and categorical visualization: total bill, tip, sex, smoker, day, time and party size.",
+  "teaching_tags": [
+    "groupby",
+    "aggregation",
+    "visualization"
+  ],
+  "position": 70,
+  "license": "Not stated by source (seaborn-data mirror)",
+  "license_url": "https://github.com/mwaskom/seaborn-data",
+  "license_status": "review-required",
+  "source_url": "https://raw.githubusercontent.com/mwaskom/seaborn-data/master/tips.csv",
+  "attribution": "Bryant & Smith, mirrored in seaborn-data.",
+  "notes": "Source repository does not publish an explicit license. Confirm redistribution terms before production use.",
+  "generated_at": "2026-11-16T11:11:41.999512+00:00",
+  "generator": "scripts/fetch_datasets.py",
+  "versions": [
+    {
+      "version": 1,
+      "format": "csv",
+      "file": "tips.csv",
+      "object_key": "tips/v1/tips.csv",
+      "relative_mount_path": "tips/v1/tips.csv",
+      "sha256": "22415aaf1e56e675b9a0983cb0d321697dad51f6060a44fb8ecaad7a00de9a09",
+      "size_bytes": 7943,
+      "row_count": 244,
+      "columns": [
+        {
+          "name": "total_bill",
+          "dtype": "float64"
+        },
+        {
+          "name": "tip",
+          "dtype": "float64"
+        },
+        {
+          "name": "sex",
+          "dtype": "object"
+        },
+        {
+          "name": "smoker",
+          "dtype": "object"
+        },
+        {
+          "name": "day",
+          "dtype": "object"
+        },
+        {
+          "name": "time",
+          "dtype": "object"
+        },
+        {
+          "name": "size",
+          "dtype": "int64"
+        }
+      ],
+      "preview": [
+        {
+          "total_bill": 16.99,
+          "tip": 1.01,
+          "sex": "Female",
+          "smoker": "No",
+          "day": "Sun",
+          "time": "Dinner",
+          "size": 2
+        },
+        {
+          "total_bill": 10.34,
+          "tip": 1.66,
+          "sex": "Male",
+          "smoker": "No",
+          "day": "Sun",
+          "time": "Dinner",
+          "size": 3
+        },
+        {
+          "total_bill": 21.01,
+          "tip": 3.5,
+          "sex": "Male",
+          "smoker": "No",
+          "day": "Sun",
+          "time": "Dinner",
+          "size": 3
+        },
+        {
+          "total_bill": 23.68,
+          "tip": 3.31,
+          "sex": "Male",
+          "smoker": "No",
+          "day": "Sun",
+          "time": "Dinner",
+          "size": 2
+        },
+        {
+          "total_bill": 24.59,
+          "tip": 3.61,
+          "sex": "Female",
+          "smoker": "No",
+          "day": "Sun",
+          "time": "Dinner",
+          "size": 4
+        }
+      ],
+      "published_at": "2026-11-16T11:11:41.999498+00:00",
+      "transform": {
+        "rows": 244,
+        "source_rows": 244,
+        "sampled": false
+      }
+    }
+  ]
+}

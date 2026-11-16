@@ -1,0 +1,148 @@
+{{- /* Fail fast on inconsistent values before rendering anything. */ -}}
+{{- include "opencs.validateValues" . -}}
+{{- $component := printf "%s-backend" (include "opencs.fullname" .) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $component }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "opencs.componentLabels" (dict "root" . "component" $component) | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.backend.replicaCount }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Never drop below the current replica count during a rollout: the UI and
+      # the JupyterHub launch orchestration must stay available.
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "opencs.componentSelectorLabels" (dict "root" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "opencs.componentLabels" (dict "root" . "component" $component) | nindent 8 }}
+        app.kubernetes.io/component: api
+      annotations:
+        # Prometheus scrape hints. The ServiceMonitor is authoritative; these
+        # keep annotation-based discovery working in clusters without the
+        # Prometheus Operator.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.backend.service.targetPort | quote }}
+        prometheus.io/path: {{ .Values.monitoring.serviceMonitor.path | quote }}
+        # Restart the pods when configuration changes.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.backend.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "opencs.serviceAccountName" . }}
+      # The API needs no Kubernetes access unless it creates grading Jobs. Only
+      # that path mounts a token, so a normal request path never carries one.
+      automountServiceAccountToken: {{ if .Values.grading.enabled }}true{{ else }}{{ .Values.backend.serviceAccount.automountServiceAccountToken }}{{ end }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: {{ .Values.backend.securityContext.runAsNonRoot }}
+        runAsUser: {{ .Values.backend.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.backend.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.backend.securityContext.fsGroup }}
+        seccompProfile:
+          type: RuntimeDefault
+      # FastAPI handles SIGTERM gracefully; 30s covers in-flight requests plus
+      # connection draining in the JupyterHub client.
+      terminationGracePeriodSeconds: {{ .Values.backend.terminationGracePeriodSeconds }}
+      {{- with .Values.backend.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- range . }}
+        - maxSkew: {{ .maxSkew }}
+          topologyKey: {{ .topologyKey }}
+          whenUnsatisfiable: {{ .whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              {{- include "opencs.componentSelectorLabels" (dict "root" $ "component" $component) | nindent 14 }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.backend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: backend
+          image: {{ include "opencs.image" (dict "image" .Values.backend.image "root" .) }}
+          imagePullPolicy: {{ include "opencs.imagePullPolicy" (dict "image" .Values.backend.image "root" .) }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.backend.service.targetPort }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "opencs.configMapName" . }}
+            - secretRef:
+                name: {{ include "opencs.secretName" . }}
+          env:
+            - name: OPENCE_DATASET_SERVING_DIR
+              value: {{ .Values.backend.datasets.mountPath | quote }}
+            - name: OPENCE_PUBLIC_ORIGIN
+              value: {{ .Values.global.origin | quote }}
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+          # /health is a pure liveness signal: it must not depend on the
+          # database, or a database blip would restart a healthy process.
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.backend.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.backend.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.backend.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.backend.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.backend.probes.liveness.failureThreshold }}
+          # /ready executes `SELECT 1`, so it gates traffic on the database.
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.backend.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.backend.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.backend.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.backend.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.backend.probes.readiness.failureThreshold }}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.backend.probes.startup.path }}
+              port: http
+            periodSeconds: {{ .Values.backend.probes.startup.periodSeconds }}
+            timeoutSeconds: {{ .Values.backend.probes.startup.timeoutSeconds }}
+            failureThreshold: {{ .Values.backend.probes.startup.failureThreshold }}
+          securityContext:
+            allowPrivilegeEscalation: {{ .Values.backend.securityContext.allowPrivilegeEscalation }}
+            readOnlyRootFilesystem: {{ .Values.backend.securityContext.readOnlyRootFilesystem }}
+            capabilities:
+              drop:
+                {{- toYaml .Values.backend.securityContext.capabilities.drop | nindent 16 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: datasets
+              mountPath: {{ .Values.backend.datasets.mountPath }}
+              readOnly: {{ .Values.backend.datasets.readOnly }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: datasets
+          persistentVolumeClaim:
+            claimName: {{ include "opencs.datasetsPvcName" . }}
+            readOnly: true

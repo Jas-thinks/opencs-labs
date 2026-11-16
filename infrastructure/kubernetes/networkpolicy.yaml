@@ -1,0 +1,399 @@
+# OpenCS Labs -- NetworkPolicies.
+#
+# Threat model: notebook pods execute arbitrary student Python. The controls in
+# this file and in policies/kyverno-notebook-policy.yaml are what stop that code
+# from reaching PostgreSQL, the Kubernetes API, MinIO, or the internet.
+#
+# Layout of this file
+#   1. opencs      -- default deny + the allow-list for the platform plane.
+#   2. opencs-hub  -- default deny + the allow-list for the notebook plane.
+#
+# Namespace selectors use the `kubernetes.io/metadata.name` label that
+# Kubernetes adds automatically to every namespace, so no manual labelling of
+# ingress-nginx or monitoring namespaces is required.
+#
+# IMPORTANT: policies are additive allow-lists. A pod is isolated for a
+# direction as soon as ANY policy selects it with that policyType; from then on
+# only explicitly allowed traffic passes. Both namespaces therefore start with
+# a default-deny ingress policy and every permitted flow is spelled out below.
+# ---------------------------------------------------------------------------
+# 1. PLATFORM PLANE -- namespace `opencs`
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Frontend: only the ingress controller may reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-from-ingress
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: opencs-frontend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 80
+---
+# Backend: reachable from the ingress controller (public API) and from
+# Prometheus (metrics scrape). Nothing else in the cluster may call it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend-from-ingress-and-monitoring
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: opencs-backend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8000
+---
+# Backend -> PostgreSQL:5432. The dataset sync Job also needs the database for
+# catalogue writes, so both workloads are allowed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres-from-backend
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opencs-backend
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: datasets-sync
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# Backend -> MinIO:9000. Only the application and the dataset sync Job speak
+# S3; notebook pods never do (they read the materialised PVC instead).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-minio-from-backend-and-sync
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: minio
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opencs-backend
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: datasets-sync
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: minio-init
+      ports:
+        - protocol: TCP
+          port: 9000
+---
+# Backend egress: DNS, PostgreSQL, MinIO and the JupyterHub API. Egress is
+# deliberately closed for the backend too -- if the API ever needs a new
+# dependency, add it here so the data-flow picture stays accurate.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend-egress
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: opencs-backend
+  policyTypes:
+    - Egress
+  egress:
+    # DNS, without which nothing resolves.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # PostgreSQL.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    # MinIO S3 API.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: minio
+      ports:
+        - protocol: TCP
+          port: 9000
+    # JupyterHub REST API. Datasets from `opencs-hub` are selected by namespace
+    # and then narrowed by the pod label, matching both the hub pod (port 8081)
+    # and the chart's alternate 8001 API port used by some deployments.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: opencs-hub
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: jupyterhub
+      ports:
+        - protocol: TCP
+          port: 8081
+        - protocol: TCP
+          port: 8001
+---
+# The dataset sync Job may reach MinIO and PostgreSQL (see above) and needs DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-sync-egress
+  namespace: opencs
+  labels:
+    app.kubernetes.io/part-of: opencs
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - datasets-sync
+          - minio-init
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: minio
+      ports:
+        - protocol: TCP
+          port: 9000
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# ---------------------------------------------------------------------------
+# 2. NOTEBOOK PLANE -- namespace `opencs-hub`
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: opencs-hub
+  labels:
+    app.kubernetes.io/part-of: opencs
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Hub + configurable HTTP proxy accept browser traffic from the ingress
+# controller (via the ExternalName alias documented in ingress.yaml) and API
+# calls from the OpenCS backend.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-hub-controller-ingress
+  namespace: opencs-hub
+  labels:
+    app.kubernetes.io/part-of: opencs
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: jupyterhub
+  policyTypes:
+    - Ingress
+  ingress:
+    # Browser -> proxy-public (JupyterHub chart serves the proxy on 8000/80).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+        - protocol: TCP
+          port: 80
+    # OpenCS backend -> hub REST API.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: opencs
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opencs-backend
+      ports:
+        - protocol: TCP
+          port: 8081
+        - protocol: TCP
+          port: 8001
+    # Hub <-> proxy chatter and KubeSpawner readiness polling stays in-namespace.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: jupyterhub
+      ports:
+        - protocol: TCP
+          port: 8081
+        - protocol: TCP
+          port: 8001
+        - protocol: TCP
+          port: 8082
+---
+# Proxy -> single-user notebook server on 8888. This is the only path into a
+# student's pod; nothing else (no other student's pod, no other namespace) may
+# open a connection to it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-proxy-to-singleuser
+  namespace: opencs-hub
+  labels:
+    app.kubernetes.io/part-of: opencs
+spec:
+  podSelector:
+    matchLabels:
+      component: singleuser-server
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: jupyterhub
+              component: proxy
+      ports:
+        - protocol: TCP
+          port: 8888
+---
+# Single-user pod egress: DNS and the hub/proxy control plane. Nothing else.
+#
+# This is the policy that keeps untrusted student code contained:
+#   * There is NO rule allowing egress to `opencs` -- so a notebook pod cannot
+#     reach PostgreSQL (5432), MinIO (9000) or the OpenCS backend (8000) even
+#     though they are in the same cluster.
+#   * There is NO rule allowing egress to 0.0.0.0/0 -- so a notebook pod cannot
+#     reach the internet. Datasets arrive read-only through the mounted PVC at
+#     /opt/opencs/datasets, never over the network.
+#   * The ONLY allowed egress destinations are kube-dns and pods labelled
+#     app.kubernetes.io/name=jupyterhub in this namespace (the hub's 8081 API,
+#     which the single-user server uses for events and shutdown messages, and
+#     the proxy's 8000 listener on deployments where the proxy sits in-path).
+#   * The Kubernetes API server is not reachable, and single-user pods do not
+#     get service-account tokens (automountServiceAccountToken: false is set by
+#     the KubeSpawner profile in values.yaml).
+#
+# To allow an approved external resource later, extend `egress` with an
+# explicit CIDR or namespaceSelector block and record the exception in
+# policies/README.md. Do not replace this policy with an allow-all.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-singleuser-egress-dns-and-hub
+  namespace: opencs-hub
+  labels:
+    app.kubernetes.io/part-of: opencs
+spec:
+  podSelector:
+    matchLabels:
+      component: singleuser-server
+  policyTypes:
+    - Egress
+  egress:
+    # DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Hub API (events, shutdown) and proxy, in-namespace only.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: jupyterhub
+      ports:
+        - protocol: TCP
+          port: 8081
+        - protocol: TCP
+          port: 8000
