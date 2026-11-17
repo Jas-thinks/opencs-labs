@@ -175,7 +175,19 @@ c.JupyterHub.authenticator_class = OpenCSAuthenticator
 # exists so the whole stack can run locally without a cluster.
 SPAWNER = _env("OPENCE_SPAWNER", "kubernetes").strip().lower()
 
-if SPAWNER == "docker":
+if SPAWNER == "local":
+    # Native host-process spawning for deployments with no Docker, no Kubernetes
+    # and no systemd (the 12-endpoint tmux deployment). Each Hub node runs its
+    # own LocalProcessSpawner; per-user servers are ordinary processes under a
+    # single OS user, so there is no cross-user kernel isolation. Documented in
+    # docs/deployment/ rather than implied.
+    c.JupyterHub.spawner_class = "jupyterhub.spawner.LocalProcessSpawner"
+    c.Spawner.cmd = [_env("OPENCE_SINGLEUSER_CMD", "jupyterhub-singleuser")]
+    c.Spawner.default_url = "/lab"
+    c.Spawner.http_timeout = int(_env("OPENCE_SPAWN_HTTP_TIMEOUT", "60"))
+    c.Spawner.start_timeout = int(_env("OPENCE_SPAWN_START_TIMEOUT", "120"))
+    c.Spawner.notebook_dir = _env("OPENCE_NOTEBOOK_HOME", "/home/student/opencs-runtime/notebooks")
+elif SPAWNER == "docker":
     c.JupyterHub.spawner_class = "dockerspawner.DockerSpawner"
     c.DockerSpawner.image = NOTEBOOK_IMAGE
     c.DockerSpawner.network_name = _env("DOCKER_NETWORK_NAME", "opencs-labs_default")
@@ -239,7 +251,7 @@ if SPAWNER == "docker":
     # Kubernetes one (2Gi); _memory_spec bridges them.
     c.DockerSpawner.mem_limit = _memory_spec(POD_MEMORY)
     c.DockerSpawner.cpu_limit = _cpu_spec(POD_CPU)
-else:
+elif SPAWNER == "kubernetes":
     c.JupyterHub.spawner_class = "kubespawner.KubeSpawner"
 
 # JupyterHub can persist `auth_state` (OpenCS user id/role/email) so the
@@ -270,7 +282,7 @@ c.Spawner.debug = False
 c.Spawner.start_timeout = 300
 c.Spawner.http_timeout = 60
 
-if SPAWNER != "docker":
+if SPAWNER == "kubernetes":
     # KubeSpawner traitlets (production). In DockerSpawner mode these belong to
     # a class that is not the active spawner, so they are only set here.
     c.KubeSpawner.image = NOTEBOOK_IMAGE
