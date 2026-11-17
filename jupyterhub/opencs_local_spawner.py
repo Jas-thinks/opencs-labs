@@ -60,6 +60,16 @@ class OpenCSLocalSpawner(LocalProcessSpawner):
         state.setdefault("home_root", self.home_root)
         return state
 
+    def make_preexec_fn(self, name: str):
+        """No setuid preexec hook.
+
+        ``LocalProcessSpawner`` returns ``set_user_setuid(name)``, which looks
+        the Hub username up in passwd and drops privileges to it. These targets
+        have no account per Hub user, and the server already runs as the service
+        account, so there is nothing to drop to.
+        """
+        return None
+
     def start(self) -> tuple[str, str]:
         self.home_dir = self._home()
         return super().start()
