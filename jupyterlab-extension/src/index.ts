@@ -227,13 +227,231 @@ class CatalogueWidget extends Widget {
   }
 }
 
+interface OpenCSMetadata {
+  notebook_id?: string;
+  state_version?: number;
+  api_base?: string;
+}
+
+function readOpenCSMetadata(panel: unknown): OpenCSMetadata | null {
+  const node = panel as
+    | {
+        content?: { model?: { metadata?: unknown } };
+        context?: { model?: { metadata?: unknown } };
+      }
+    | null;
+  const metadata = (node?.content?.model?.metadata ?? node?.context?.model?.metadata) as
+    | { opencs?: OpenCSMetadata; get?: (key: string) => unknown }
+    | undefined;
+  if (!metadata) {
+    return null;
+  }
+  if (typeof metadata.get === 'function') {
+    const value = metadata.get('opencs') as OpenCSMetadata | undefined;
+    if (value) {
+      return value;
+    }
+  }
+  return (metadata.opencs as OpenCSMetadata | undefined) ?? null;
+}
+
+/**
+ * Snapshot/autosave + heartbeat for the open notebook.
+ *
+ * The backend is authoritative: every save carries the `base_version` this
+ * client last saw. A 409 means another writer advanced the version; we refresh
+ * the base and retry once. Identical content is an idempotent no-op server-side.
+ */
+class NotebookStateSync {
+  private panel: any = null;
+  private notebookId: string | null = null;
+  private stateVersion = 0;
+  private base = apiBase();
+  private shared: any = null;
+  private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private inFlight = false;
+  private pending = false;
+
+  private readonly onChange = () => this.schedule(2000);
+  private readonly onCurrentChanged = () => this.attach();
+
+  constructor(private readonly tracker: INotebookTracker) {
+    this.tracker.currentChanged.connect(this.onCurrentChanged);
+    this.attach();
+    this.heartbeatTimer = setInterval(() => {
+      void this.heartbeat();
+    }, 30000);
+  }
+
+  private attach(): void {
+    if (this.shared) {
+      try {
+        this.shared.changed.disconnect(this.onChange);
+      } catch {
+        // already disconnected
+      }
+      this.shared = null;
+    }
+    this.panel = this.tracker.currentWidget;
+    this.notebookId = null;
+    if (!this.panel) {
+      return;
+    }
+    const opencs = readOpenCSMetadata(this.panel);
+    if (!opencs?.notebook_id) {
+      return;
+    }
+    this.notebookId = opencs.notebook_id;
+    this.stateVersion = Number(opencs.state_version ?? 0);
+    this.base = opencs.api_base || apiBase();
+    this.shared = this.panel.content?.model?.sharedModel ?? null;
+    if (this.shared?.changed?.connect) {
+      this.shared.changed.connect(this.onChange);
+    }
+    void this.heartbeat();
+  }
+
+  private document(): Record<string, unknown> | null {
+    try {
+      const model = this.panel?.content?.model ?? this.panel?.context?.model;
+      if (model && typeof model.toJSON === 'function') {
+        return model.toJSON() as Record<string, unknown>;
+      }
+    } catch {
+      // fall through
+    }
+    return null;
+  }
+
+  private schedule(delay = 2000): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+    }
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      void this.flush();
+    }, delay);
+  }
+
+  private async put(document: Record<string, unknown>): Promise<Response> {
+    return fetch(`${this.base}/notebooks/${encodeURIComponent(this.notebookId!)}/autosave`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ base_version: this.stateVersion, document })
+    });
+  }
+
+  private async flush(): Promise<void> {
+    if (!this.notebookId) {
+      return;
+    }
+    if (this.inFlight) {
+      this.pending = true;
+      return;
+    }
+    const document = this.document();
+    if (!document) {
+      return;
+    }
+    this.inFlight = true;
+    try {
+      let response = await this.put(document);
+      if (response.status === 409) {
+        const body = (await response.json()) as {
+          error?: { details?: { current_version?: number } };
+        };
+        this.stateVersion = Number(
+          body?.error?.details?.current_version ?? this.stateVersion
+        );
+        response = await this.put(document);
+      }
+      if (response.ok) {
+        const body = (await response.json()) as { version?: number };
+        if (typeof body.version === 'number') {
+          this.stateVersion = body.version;
+        }
+      }
+    } catch {
+      // Offline or the backend is restarting; the watcher is the backstop.
+    } finally {
+      this.inFlight = false;
+      if (this.pending) {
+        this.pending = false;
+        this.schedule(500);
+      }
+    }
+  }
+
+  private async heartbeat(): Promise<void> {
+    if (!this.notebookId) {
+      return;
+    }
+    try {
+      await fetch(
+        `${this.base}/notebooks/${encodeURIComponent(this.notebookId)}/heartbeat`,
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ client: 'jupyterlab' })
+        }
+      );
+    } catch {
+      // Presence is best-effort; never surface this to the student.
+    }
+  }
+
+  dispose(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+    }
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+    }
+    if (this.shared) {
+      try {
+        this.shared.changed.disconnect(this.onChange);
+      } catch {
+        // already disconnected
+      }
+    }
+    this.tracker.currentChanged.disconnect(this.onCurrentChanged);
+  }
+}
+
+/** Ask JupyterLab's document manager to autosave every 30 seconds. */
+async function configureAutosave(registry: any): Promise<void> {
+  if (!registry?.load) {
+    return;
+  }
+  try {
+    const settings = await registry.load('@jupyterlab/docmanager-extension:plugin');
+    if (settings.get('autosaveInterval').composite !== 30) {
+      await settings.set('autosaveInterval', 30);
+    }
+  } catch {
+    // Older/newer JupyterLab versions may not expose this setting; the
+    // extension's own autosave and the backend watcher still cover it.
+  }
+}
+
 const plugin: JupyterFrontEndPlugin<void> = {
   id: PLUGIN_ID,
   description:
     'Insert OpenCS dataset loading cells into the active notebook. Cells are never auto-executed.',
   autoStart: true,
   requires: [INotebookTracker, IMainMenu],
-  activate: (app: JupyterFrontEnd, tracker: INotebookTracker, mainMenu: IMainMenu) => {
+  optional: ['@jupyterlab/settingregistry:settingRegistry'],
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    mainMenu: IMainMenu,
+    settingRegistry?: any
+  ) => {
+    void configureAutosave(settingRegistry);
+
     app.commands.addCommand(COMMAND_INSERT, {
       label: 'Insert dataset cell',
       caption: 'Insert a dataset loading cell into the active notebook (never executed)',
@@ -287,8 +505,17 @@ const plugin: JupyterFrontEndPlugin<void> = {
     menu.addItem({ command: COMMAND_OPEN_PANEL });
     menu.addItem({ command: COMMAND_INSERT });
     mainMenu.addMenu(menu, false);
+
+    const sync = new NotebookStateSync(tracker);
+    app.shell.disposed.connect(() => sync.dispose());
   }
 };
 
 export default plugin;
-export { COMMAND_INSERT, COMMAND_OPEN_PANEL, fetchSnippet, insertCodeCell };
+export {
+  COMMAND_INSERT,
+  COMMAND_OPEN_PANEL,
+  NotebookStateSync,
+  fetchSnippet,
+  insertCodeCell
+};

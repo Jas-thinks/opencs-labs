@@ -115,11 +115,136 @@ manifest; the browser cannot contribute a path segment.
 | DELETE | `/notebooks/{id}` | Delete (204) |
 | GET    | `/notebooks/{id}/open` | Authorized open URL |
 | GET    | `/notebooks/{id}/download` | Download the `.ipynb` |
+| PUT    | `/notebooks/{id}/autosave` | Snapshot the document (`{ base_version, document }`) |
+| POST   | `/notebooks/{id}/heartbeat` | Presence/heartbeat (`{ client }`) |
+| GET    | `/notebooks/{id}/versions` | Immutable revisions (`kind`, `limit`) |
+| GET    | `/notebooks/{id}/versions/{n}/download` | Download an exact revision |
 
 `ServerStateOut`: `{ running, ready, status, pending, url }`.
 
 Ownership is enforced on every operation; another user's notebook is reported
-as `404`, indistinguishable from missing.
+as `404`, indistinguishable from missing. Course staff may read revisions of a
+notebook that was submitted to their course.
+
+### Autosave and versions
+
+`PUT /notebooks/{id}/autosave` returns:
+
+```json
+{ "version": 13, "saved": true, "sha256": "…", "saved_at": "…", "version_number": 7 }
+```
+
+Identical content is a successful no-op (`saved: false`) even with a stale
+`base_version`. Changed content with a stale `base_version` returns
+`409 VERSION_CONFLICT` with `details.current_version` and
+`details.latest_sha256`; reload the latest version and re-apply. Autosave is
+rate limited to 12 requests/minute per notebook.
+
+## Courses and roster
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/courses` | authenticated | Courses you are enrolled in or staff |
+| GET | `/courses/{course_id}` | member | Course detail |
+| GET | `/courses/{course_id}/roster` | staff | Roster with progress/grade summary |
+| POST | `/courses/{course_id}/enrollments` | instructor/admin | Bulk enroll/update |
+| PATCH | `/courses/{course_id}/enrollments/{user_id}` | instructor/admin | Change `role_in_course` |
+
+Course roles are `student`, `ta` and `instructor`. Non-members receive `404`;
+members without the required role receive `403`. A global `admin` bypasses
+course scoping.
+
+`RosterRow`: `{ user_id, display_name, email, role_in_course, assigned,
+submitted, completed, average_score, late_count, ungraded_count,
+last_active_at }`.
+
+## Assignments and rubrics
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/courses/{course_id}/assignments` | instructor/admin | Create assignment |
+| GET | `/courses/{course_id}/assignments` | member | List (students see published only) |
+| GET | `/assignments/{assignment_id}` | member | Detail |
+| PATCH | `/assignments/{assignment_id}` | instructor/admin | Update |
+| PUT | `/assignments/{assignment_id}/rubric` | instructor/admin | Upsert rubric + criteria |
+| GET | `/assignments/{assignment_id}/rubric` | member | Read (students get labels/max only) |
+
+Create assignment:
+
+```json
+{ "title": "Iris selection", "exercise_slug": "pandas-select-iris",
+  "kind": "practice", "due_at": "2026-12-01T23:59:00Z",
+  "max_points": 100, "weight": 1, "allow_late": true,
+  "late_penalty_pct": 10, "is_published": true }
+```
+
+Rubric upsert:
+
+```json
+{ "title": "Iris rubric",
+  "criteria": [
+    { "key": "filter", "label": "Correct filter", "max_points": 40, "position": 1 },
+    { "key": "derive", "label": "Derived column", "max_points": 40, "position": 2 },
+    { "key": "style",  "label": "Readable code",  "max_points": 20, "position": 3 }
+  ] }
+```
+
+A rubric that already has grades attached cannot add or remove criteria; it can
+only update labels, descriptions and maxima in place.
+
+## Submissions and grading
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/assignments/{id}/submissions` | enrolled student | Submit a notebook snapshot |
+| GET | `/assignments/{id}/submissions` | staff | Review queue (`status`, `late`, `cursor`) |
+| GET | `/submissions/{id}` | owner or staff | Submission detail |
+| GET | `/submissions/{id}/notebook` | owner or staff | Immutable snapshot document |
+| POST | `/submissions/{id}/grade` | staff | Publish a grade revision (rate limited) |
+| GET | `/submissions/{id}/grades` | owner or staff | All revisions, newest first |
+| GET | `/me/grades` | student | Published grades (`course_id` optional) |
+
+Submit: `{ "notebook_id": "…" }` → `201 SubmissionOut`. Late submissions are
+flagged when `allow_late` is true and rejected with `409 ASSIGNMENT_CLOSED`
+otherwise. Each attempt creates a new immutable `submission` notebook version.
+
+`GET /submissions/{id}` returns the submission, snapshot metadata, the latest
+grade revision and the rubric (criterion descriptions are hidden from students).
+
+Grade:
+
+```json
+{ "criteria": [
+    { "criterion_id": "…", "points": 38, "comment": "Misses .copy()" },
+    { "criterion_id": "…", "points": 40, "comment": "" },
+    { "criterion_id": "…", "points": 18, "comment": "Add spacing" }
+  ],
+  "feedback": "Nice work overall.",
+  "final_score": null }
+```
+
+Every criterion must be scored exactly once and within `[0, max_points]`.
+Publishing is immediate. A regrade inserts revision 2; earlier revisions are
+never overwritten. `final_score: null` uses the rubric total; a non-null value
+is the TA override.
+
+## Analytics
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/analytics/me?course_id=` | student | Personal dashboard |
+| GET | `/analytics/courses/{id}?assignment_id=&from=&to=` | staff | Class dashboard |
+| GET | `/analytics/courses/{id}/students/{user_id}` | staff or self | Drill-down |
+| GET | `/analytics/courses/{id}/export.csv` | staff | CSV roster export |
+
+Student dashboard: completion counts, latest/best/average scores with trend,
+per-criterion mastery, idle-capped time on task, late/ungraded counts and a
+per-assignment table.
+
+Teacher dashboard: summary (students, completion rate, class average, late
+rate, ungraded queue), per-assignment submitted/graded counts and score
+distribution, class criterion averages, and a paginated roster. Everything is
+computed on demand from the normalized tables.
 
 ## Operations
 

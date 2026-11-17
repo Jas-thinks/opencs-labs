@@ -57,8 +57,14 @@ class Settings(BaseSettings):
     # --- urls ------------------------------------------------------------
     public_origin: str = "http://localhost:5173"
     api_prefix: str = "/api/v1"
+    # Absolute base the browser/JupyterLab extension should call. Empty means
+    # derive it from public_origin + api_prefix (correct behind the Vite dev
+    # proxy or a single-origin ingress).
+    api_public_base: str = ""
     login_path: str = "/login"
-    cors_origins: str = "http://localhost:5173,http://localhost:8000"
+    cors_origins: str = (
+        "http://localhost:5173,http://localhost:8000,http://localhost:8888"
+    )
 
     # --- jupyterhub ------------------------------------------------------
     # The Hub REST API lives under /hub/api (hub_api_url).
@@ -80,7 +86,9 @@ class Settings(BaseSettings):
     # local_notebooks_dir, spawned on first use by the backend.
     local_notebooks_dir: str = str(REPO_ROOT / "backend" / "data" / "local-notebooks")
     local_notebook_python: str = ""
-    local_notebook_host: str = "127.0.0.1"
+    # ``localhost`` (not 127.0.0.1) so the host-only session cookie set on
+    # localhost applies inside JupyterLab too.
+    local_notebook_host: str = "localhost"
     local_notebook_port: int = 8888
 
     # --- object storage --------------------------------------------------
@@ -125,9 +133,22 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_launch_per_minute: int = 10
     rate_limit_evaluate_per_minute: int = 6
+    rate_limit_autosave_per_minute: int = 12
 
     # --- capacity --------------------------------------------------------
     max_active_sessions: int = 450
+
+    # --- notebook state / background work --------------------------------
+    autosave_retention: int = 20
+    session_idle_seconds: int = 300
+    watcher_interval_seconds: int = 10
+    watcher_active_window_seconds: int = 900
+    job_worker_interval_seconds: int = 15
+    job_max_attempts: int = 5
+    job_stuck_seconds: int = 600
+    # Disabled by the test suite so the in-process loops never touch the
+    # developer's real database.
+    background_workers_enabled: bool = True
 
     @field_validator("api_prefix")
     @classmethod
@@ -143,6 +164,13 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def public_api_base(self) -> str:
+        """Absolute API base written into notebook metadata for the extension."""
+        if self.api_public_base:
+            return self.api_public_base.rstrip("/")
+        return f"{self.public_origin.rstrip('/')}{self.api_prefix}"
 
     @property
     def hub_proxy_url(self) -> str:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
 
 from app.auth.service import get_current_user
@@ -14,10 +14,16 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.integrations.notebooks import NotebookBackend, get_notebook_backend
 from app.notebooks.schemas import (
+    AutosaveRequest,
+    AutosaveResponse,
+    HeartbeatRequest,
+    HeartbeatResponse,
     NotebookCreate,
     NotebookListResponse,
     NotebookOut,
     NotebookUpdate,
+    NotebookVersionList,
+    NotebookVersionOut,
     OpenNotebookResponse,
     ServerStateOut,
 )
@@ -118,4 +124,72 @@ def download_notebook(
         content=body,
         media_type="application/x-ipynb+json",
         headers={"content-disposition": f'attachment; filename="{row.file_name}"'},
+    )
+
+
+@router.put("/{notebook_id}/autosave", response_model=AutosaveResponse)
+def autosave_notebook(
+    notebook_id: str,
+    payload: AutosaveRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    service: NotebookService = Depends(_service),
+):
+    enforce_rate_limit(
+        request,
+        f"notebook-autosave:{notebook_id}",
+        settings.rate_limit_autosave_per_minute,
+    )
+    result = service.autosave(
+        user,
+        notebook_id,
+        base_version=payload.base_version,
+        document=payload.document,
+    )
+    return AutosaveResponse(**result)
+
+
+@router.post("/{notebook_id}/heartbeat", response_model=HeartbeatResponse)
+def heartbeat(
+    notebook_id: str,
+    payload: HeartbeatRequest | None = None,
+    user: User = Depends(get_current_user),
+    service: NotebookService = Depends(_service),
+):
+    client = payload.client if payload else "jupyterlab"
+    return HeartbeatResponse(**service.heartbeat(user, notebook_id, client=client))
+
+
+@router.get("/{notebook_id}/versions", response_model=NotebookVersionList)
+def list_versions(
+    notebook_id: str,
+    kind: str | None = Query(default=None, pattern="^(autosave|checkpoint|submission|manual)$"),
+    limit: int = Query(default=50, ge=1, le=200),
+    user: User = Depends(get_current_user),
+    service: NotebookService = Depends(_service),
+):
+    rows = service.list_versions(user, notebook_id, kind=kind, limit=limit)
+    return NotebookVersionList(
+        versions=[NotebookVersionOut(**row) for row in rows]
+    )
+
+
+@router.get("/{notebook_id}/versions/{version_number}/download")
+def download_version(
+    notebook_id: str,
+    version_number: int,
+    user: User = Depends(get_current_user),
+    service: NotebookService = Depends(_service),
+):
+    row, version, document = service.download_version(user, notebook_id, version_number)
+    body = json.dumps(document, indent=1, ensure_ascii=False)
+    return Response(
+        content=body,
+        media_type="application/x-ipynb+json",
+        headers={
+            "content-disposition": (
+                f'attachment; filename="{row.file_name.removesuffix(".ipynb")}'
+                f'-v{version["version_number"]}.ipynb"'
+            )
+        },
     )

@@ -10,6 +10,10 @@ import { ExercisePage } from "../features/practice/ExercisePage";
 import { NotebooksHome } from "../features/notebooks/NotebooksHome";
 import { DatasetsHome } from "../features/datasets/DatasetsHome";
 import { DatasetPage } from "../features/datasets/DatasetPage";
+import { DashboardPage } from "../features/grading/DashboardPage";
+import { TeachingPage } from "../features/grading/TeachingPage";
+import { StudentDetailPage } from "../features/grading/StudentDetailPage";
+import { AssignmentPage } from "../features/grading/AssignmentPage";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -41,6 +45,10 @@ export function AppRoutes() {
         <Route path="/notebooks" element={<NotebooksHome />} />
         <Route path="/datasets" element={<DatasetsHome />} />
         <Route path="/datasets/:datasetSlug" element={<DatasetPage />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/teaching" element={<TeachingPage />} />
+        <Route path="/teaching/courses/:courseId/students/:userId" element={<StudentDetailPage />} />
+        <Route path="/assignments/:assignmentId" element={<AssignmentPage />} />
       </Route>
       <Route path="*" element={<Navigate to={user ? "/learn" : "/login"} replace />} />
     </Routes>

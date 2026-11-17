@@ -7,6 +7,8 @@ const navItems = [
   { to: "/practice", label: "Practice", icon: "◎" },
   { to: "/notebooks", label: "Notebooks", icon: "▤" },
   { to: "/datasets", label: "Datasets", icon: "▦" },
+  { to: "/dashboard", label: "Dashboard", icon: "◫" },
+  { to: "/teaching", label: "Teaching", icon: "▥" },
 ];
 
 function initials(name: string): string {

@@ -39,7 +39,9 @@ def test_migration_applies_on_sqlite(tmp_path, filename):
     assert result.returncode == 0, result.stderr
 
     engine = create_engine(url)
-    tables = set(inspect(engine).get_table_names())
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    views = set(inspector.get_view_names())
     engine.dispose()
 
     for expected in {
@@ -55,8 +57,26 @@ def test_migration_applies_on_sqlite(tmp_path, filename):
         "exercises",
         "practice_attempts",
         "notebooks",
+        "notebook_blobs",
+        "notebook_versions",
+        "notebook_sessions",
+        "assignments",
+        "rubrics",
+        "rubric_criteria",
+        "submissions",
+        "submission_grades",
+        "grade_criterion_scores",
+        "jobs",
     }:
         assert expected in tables, f"missing table {expected}"
+
+    for expected in {
+        "v_latest_submission",
+        "v_latest_grade",
+        "v_student_assignment",
+        "v_criterion_mastery",
+    }:
+        assert expected in views, f"missing view {expected}"
 
 
 def test_migration_downgrades_cleanly(tmp_path):

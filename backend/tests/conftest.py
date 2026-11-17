@@ -6,8 +6,13 @@ seam. Nothing here changes the production code path.
 
 from __future__ import annotations
 
+import os
 import uuid
 from collections.abc import Iterator
+
+# Keep the in-process watcher/job loops away from the developer database. This
+# must be set before app.core.config is imported (it reads the environment once).
+os.environ.setdefault("OPENCE_BACKGROUND_WORKERS_ENABLED", "false")
 
 import pytest
 from fastapi.testclient import TestClient
@@ -109,6 +114,7 @@ def users(db: Session) -> dict[str, User]:
         ("student1@test.local", "Student One", "student", "teststudent1"),
         ("student2@test.local", "Student Two", "student", "teststudent2"),
         ("instructor@test.local", "Instructor", "instructor", "testinstructor"),
+        ("ta@test.local", "Teaching Assistant", "student", "testta"),
     ]
     created = {}
     for email, name, role, hub in specs:
@@ -143,6 +149,49 @@ def other_student_client(client, users) -> TestClient:
     # A separate cookie jar for a second user.
     second = TestClient(client.app)
     return login(second, "student2@test.local")
+
+
+@pytest.fixture()
+def instructor_client(client, users) -> TestClient:
+    instructor = TestClient(client.app)
+    return login(instructor, "instructor@test.local")
+
+
+@pytest.fixture()
+def ta_client(client, users) -> TestClient:
+    ta = TestClient(client.app)
+    return login(ta, "ta@test.local")
+
+
+@pytest.fixture()
+def course(db: Session, users) -> "Course":
+    from app.courses.models import Course, Enrollment
+
+    course = Course(
+        name="Test Course",
+        code="TEST-101",
+        term="2026-S1",
+        status="active",
+        description="Course for grading tests",
+    )
+    db.add(course)
+    db.flush()
+    for email, role in [
+        ("student1@test.local", "student"),
+        ("student2@test.local", "student"),
+        ("instructor@test.local", "instructor"),
+        ("ta@test.local", "ta"),
+    ]:
+        db.add(
+            Enrollment(
+                course_id=course.id,
+                user_id=users[email].id,
+                role_in_course=role,
+            )
+        )
+    db.commit()
+    db.refresh(course)
+    return course
 
 
 @pytest.fixture()

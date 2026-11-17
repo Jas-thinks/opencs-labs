@@ -29,6 +29,7 @@ from app.datasets.models import Dataset, DatasetVersion  # noqa: E402
 from app.db.base import utcnow  # noqa: E402
 from app.db.session import SessionLocal  # noqa: E402
 from app.learning.models import LearningPath, Lesson, Module  # noqa: E402
+from app.grading.models import Assignment, Rubric, RubricCriterion  # noqa: E402
 from app.practice.models import Exercise  # noqa: E402
 from app.users.models import User  # noqa: E402
 
@@ -47,6 +48,12 @@ SEED_USERS = [
         "display_name": "Dr. Ada Instructor",
         "role": "instructor",
         "hub_username": "instructor",
+    },
+    {
+        "email": "ta@opencs.local",
+        "display_name": "Tariq Teaching Assistant",
+        "role": "student",
+        "hub_username": "ta1",
     },
     {
         "email": "student@opencs.local",
@@ -110,8 +117,9 @@ def upsert_course(db: Session, users: dict[str, User]) -> Course:
         db.flush()
         log("  + course CS-2410")
     for email, role in [
-        ("admin@opencs.local", "staff"),
+        ("admin@opencs.local", "instructor"),
         ("instructor@opencs.local", "instructor"),
+        ("ta@opencs.local", "ta"),
         ("student@opencs.local", "student"),
         ("student2@opencs.local", "student"),
     ]:
@@ -123,6 +131,8 @@ def upsert_course(db: Session, users: dict[str, User]) -> Course:
         )
         if enrollment is None:
             db.add(Enrollment(course_id=course.id, user_id=user.id, role_in_course=role))
+        else:
+            enrollment.role_in_course = role
     db.flush()
     return course
 
@@ -295,15 +305,80 @@ def upsert_exercises(db: Session) -> int:
     return count
 
 
+def upsert_course_work(db: Session, users: dict[str, User], course: Course) -> Assignment:
+    """Seed one published assignment and its rubric."""
+    instructor = users["instructor@opencs.local"]
+    assignment = db.scalar(
+        select(Assignment).where(
+            Assignment.course_id == course.id, Assignment.slug == "iris-selection"
+        )
+    )
+    if assignment is None:
+        assignment = Assignment(
+            course_id=course.id,
+            slug="iris-selection",
+            title="Iris selection",
+            created_by=instructor.id,
+        )
+        db.add(assignment)
+        db.flush()
+        log("  + assignment iris-selection")
+    exercise = db.scalar(select(Exercise).where(Exercise.slug == "pandas-select-iris"))
+    assignment.exercise_id = exercise.id if exercise else None
+    assignment.kind = "practice"
+    assignment.title = "Iris selection"
+    assignment.description = "Select and derive columns from the Iris dataset."
+    assignment.due_at = dt.datetime(2026, 12, 1, 23, 59, tzinfo=dt.UTC)
+    assignment.max_points = 100
+    assignment.weight = 1
+    assignment.allow_late = True
+    assignment.late_penalty_pct = 10
+    assignment.is_published = True
+
+    rubric = db.scalar(select(Rubric).where(Rubric.assignment_id == assignment.id))
+    if rubric is None:
+        rubric = Rubric(
+            assignment_id=assignment.id,
+            title="Iris rubric",
+            created_by=instructor.id,
+        )
+        db.add(rubric)
+        db.flush()
+        log("  + rubric for iris-selection")
+    rubric.title = "Iris rubric"
+    specs = [
+        ("filter", "Correct filter", 40, 1),
+        ("derive", "Derived column", 40, 2),
+        ("style", "Readable code", 20, 3),
+    ]
+    for key, label, max_points, position in specs:
+        criterion = db.scalar(
+            select(RubricCriterion).where(
+                RubricCriterion.rubric_id == rubric.id, RubricCriterion.key == key
+            )
+        )
+        if criterion is None:
+            criterion = RubricCriterion(rubric_id=rubric.id, key=key, label=label)
+            db.add(criterion)
+        criterion.label = label
+        criterion.max_points = max_points
+        criterion.position = position
+    db.flush()
+    rubric.total_points = sum(spec[2] for spec in specs)
+    db.flush()
+    return assignment
+
+
 def main() -> int:
     log("Seeding OpenCS Labs")
     log(f"  database: {settings.database_url.rsplit('@', 1)[-1]}")
     with SessionLocal() as db:
         users = upsert_users(db)
-        upsert_course(db, users)
+        course = upsert_course(db, users)
         upsert_datasets(db)
         upsert_curriculum(db)
         upsert_exercises(db)
+        upsert_course_work(db, users, course)
         db.commit()
 
         log("\nDemo accounts (development only):")

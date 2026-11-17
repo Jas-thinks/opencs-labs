@@ -6,6 +6,21 @@
 |---|---|---|
 | Docker Compose | single host, DockerSpawner | development, small class |
 | Kubernetes + Helm | Hub + KubeSpawner + per-user pods | production, 400 concurrent users |
+| **11-server native** | **1 LB + 3 API + 3 DB + 4 Jupyter; no Docker** | **systemd/venv deployment on the current allocation** |
+
+The 11-server, no-Docker target is documented in `docs/PLAN_2.md` and
+`docs/DEPLOYMENT.md`. It uses native systemd services, Python virtualenvs,
+PostgreSQL + PgBouncer, a custom SSH/systemd JupyterHub spawner, and
+`systemd-run` for the grading sandbox. **Do not use Docker Compose,
+DockerSpawner, Swarm, or a Docker socket for that deployment.** The Compose and
+Kubernetes paths above remain for development and a different production
+platform; they are not the 11-server runbook.
+
+The capacity verdict for the 11-server target is explicit in `PLAN_2.md`:
+500 simultaneous 16 GB GPU notebooks do not fit, and even 500 standard 2 GB
+sessions do not fit on 4 notebook nodes (4 × 56 = 224). The five unassigned
+servers can be promoted to `nb-5..nb-9` to reach ~504 standard slots; heavy/GPU
+profiles remain capped by RAM/GPU count and must be queued or rejected.
 
 ## Configuration
 

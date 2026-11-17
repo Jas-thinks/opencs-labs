@@ -82,7 +82,7 @@ notebook-venv:
 
 # Manual fallback; the backend normally auto-spawns this server on first use.
 local-notebooks:
-	$(NOTEBOOK_PY) -m jupyterlab --no-browser --ip=127.0.0.1 --port=8888 \
+	$(NOTEBOOK_PY) -m jupyterlab --no-browser --ip=localhost --port=8888 \
 		--ServerApp.root_dir=backend/data/local-notebooks \
 		--ServerApp.token= --ServerApp.password=
 

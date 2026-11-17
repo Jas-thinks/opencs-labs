@@ -41,8 +41,20 @@ token cannot be replayed under a different identity.
 - Roles (`student`, `instructor`, `admin`) gate staff-only dependency
   (`require_admin` / `require_staff`); the role is read from the database, not
   trusted from the token alone.
+- Course-scoped access is governed by `Enrollment.role_in_course`
+  (`student|ta|instructor`). Non-members get `404`; members without the needed
+  course role get `403`. A global `admin` bypasses course scoping, and existing
+  `staff` enrollments are treated as instructor-level for compatibility.
+- Notebook version history is owner-only except for course staff of a course
+  where that notebook was submitted. Snapshot blobs are immutable and are never
+  rewritten by regrading or resubmission.
 - Dataset snippets are composed server-side; the browser cannot contribute a
   path segment, so traversal is structurally impossible.
+- Autosave documents are validated as `nbformat` v4 JSON and capped at 8 MB;
+  invalid payloads are rejected with `422 INVALID_NOTEBOOK`.
+- The JupyterLab extension sends only the session cookie (`credentials:
+  include`); notebook metadata carries public IDs and the API base, never a
+  token or secret.
 
 ## Isolation
 

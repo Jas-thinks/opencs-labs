@@ -1,23 +1,37 @@
 import type {
+  AssignmentListResponse,
+  AssignmentOut,
   AttemptCreateResponse,
   AttemptOut,
   CategorySummary,
+  CourseListResponse,
+  CourseOut,
   DatasetDetail,
   DatasetListResponse,
   DatasetVersionOut,
   ExerciseDetail,
   ExerciseListResponse,
   FeedbackResponse,
+  GradeListResponse,
+  GradeOut,
   LaunchResponse,
   LessonDetail,
   LessonProgressOut,
+  MyGradesResponse,
   OpenNotebookResponse,
   PathsResponse,
   PracticeProgress,
   Preferences,
   PreviewResponse,
+  RosterResponse,
+  RubricOut,
   ServerStateOut,
   SnippetResponse,
+  StudentDashboard,
+  StudentDrilldown,
+  SubmissionListResponse,
+  SubmissionOut,
+  TeacherDashboard,
   TopicSummary,
   UserOut,
 } from "./types";
@@ -86,7 +100,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return payload as T;
 }
 
-function query(params: Record<string, string | number | undefined | null>): string {
+function query(params: Record<string, string | number | boolean | undefined | null>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === "") continue;
@@ -191,4 +205,79 @@ export const api = {
   openNotebook: (id: string) =>
     request<OpenNotebookResponse>(`/notebooks/${encodeURIComponent(id)}/open`),
   downloadNotebookUrl: (id: string) => `${API_BASE}/notebooks/${encodeURIComponent(id)}/download`,
+
+  // courses
+  courses: () => request<CourseListResponse>("/courses"),
+  course: (id: string) => request<CourseOut>(`/courses/${encodeURIComponent(id)}`),
+  roster: (id: string, params: { limit?: number; offset?: number } = {}) =>
+    request<RosterResponse>(`/courses/${encodeURIComponent(id)}/roster${query(params)}`),
+
+  // assignments and rubrics
+  assignments: (courseId: string) =>
+    request<AssignmentListResponse>(
+      `/courses/${encodeURIComponent(courseId)}/assignments`,
+    ),
+  assignment: (id: string) =>
+    request<AssignmentOut>(`/assignments/${encodeURIComponent(id)}`),
+  createAssignment: (courseId: string, payload: Record<string, unknown>) =>
+    request<AssignmentOut>(`/courses/${encodeURIComponent(courseId)}/assignments`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateAssignment: (id: string, payload: Record<string, unknown>) =>
+    request<AssignmentOut>(`/assignments/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  rubric: (assignmentId: string) =>
+    request<RubricOut>(`/assignments/${encodeURIComponent(assignmentId)}/rubric`),
+  upsertRubric: (assignmentId: string, payload: Record<string, unknown>) =>
+    request<RubricOut>(`/assignments/${encodeURIComponent(assignmentId)}/rubric`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+
+  // submissions and grading
+  submitAssignment: (assignmentId: string, notebookId: string) =>
+    request<SubmissionOut>(
+      `/assignments/${encodeURIComponent(assignmentId)}/submissions`,
+      { method: "POST", body: JSON.stringify({ notebook_id: notebookId }) },
+    ),
+  submissions: (
+    assignmentId: string,
+    params: { status?: string; late?: boolean; cursor?: string; limit?: number } = {},
+  ) =>
+    request<SubmissionListResponse>(
+      `/assignments/${encodeURIComponent(assignmentId)}/submissions${query(params)}`,
+    ),
+  submission: (id: string) =>
+    request<SubmissionOut>(`/submissions/${encodeURIComponent(id)}`),
+  submissionNotebook: (id: string) =>
+    request<Record<string, unknown>>(`/submissions/${encodeURIComponent(id)}/notebook`),
+  gradeSubmission: (id: string, payload: Record<string, unknown>) =>
+    request<GradeOut>(`/submissions/${encodeURIComponent(id)}/grade`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  submissionGrades: (id: string) =>
+    request<GradeListResponse>(`/submissions/${encodeURIComponent(id)}/grades`),
+  myGrades: (courseId?: string) =>
+    request<MyGradesResponse>(`/me/grades${query({ course_id: courseId })}`),
+
+  // analytics
+  myDashboard: (courseId?: string) =>
+    request<StudentDashboard>(`/analytics/me${query({ course_id: courseId })}`),
+  courseDashboard: (
+    courseId: string,
+    params: { assignment_id?: string; from?: string; to?: string; limit?: number; offset?: number } = {},
+  ) =>
+    request<TeacherDashboard>(
+      `/analytics/courses/${encodeURIComponent(courseId)}${query(params)}`,
+    ),
+  studentDrilldown: (courseId: string, userId: string) =>
+    request<StudentDrilldown>(
+      `/analytics/courses/${encodeURIComponent(courseId)}/students/${encodeURIComponent(userId)}`,
+    ),
+  courseExportUrl: (courseId: string) =>
+    `${API_BASE}/analytics/courses/${encodeURIComponent(courseId)}/export.csv`,
 };

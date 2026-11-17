@@ -51,6 +51,9 @@ class PracticeAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     notebook_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("notebooks.id", ondelete="SET NULL")
     )
+    assignment_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("assignments.id", ondelete="SET NULL"), index=True
+    )
     attempt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="in_progress")
     score: Mapped[float | None] = mapped_column(Float)

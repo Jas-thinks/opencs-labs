@@ -6,7 +6,9 @@ but there is one deployable application and one database.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -15,19 +17,43 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app import __version__
+from app.analytics.router import router as analytics_router
 from app.auth.router import router as auth_router
 from app.core.config import settings
 from app.core.errors import ApiError, api_error_handler, unhandled_error_handler
+from app.core.jobs import job_worker_loop
 from app.core.logging import RequestContextMiddleware, configure_logging
 from app.core.metrics import MetricsMiddleware, metrics_response
+from app.courses.router import router as courses_router
 from app.datasets.router import router as datasets_router
 from app.db.session import SessionLocal
+from app.grading.router import router as grading_router
 from app.learning.router import router as learning_router
 from app.notebooks.router import router as notebooks_router
+from app.notebooks.watcher import watcher_loop
 from app.practice.router import router as practice_router
 from app.users.router import router as users_router
 
 logger = logging.getLogger("opencs")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    tasks: list[asyncio.Task] = []
+    if settings.background_workers_enabled:
+        tasks = [
+            asyncio.create_task(watcher_loop(), name="opencs-autosave-watcher"),
+            asyncio.create_task(job_worker_loop(), name="opencs-job-worker"),
+        ]
+        logger.info("background workers started")
+    try:
+        yield
+    finally:
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+            logger.info("background workers stopped")
 
 
 def create_app() -> FastAPI:
@@ -47,6 +73,7 @@ def create_app() -> FastAPI:
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",
         redoc_url=None,
+        lifespan=lifespan,
     )
 
     app.add_middleware(RequestContextMiddleware)
@@ -71,6 +98,9 @@ def create_app() -> FastAPI:
     app.include_router(practice_router, prefix=prefix)
     app.include_router(datasets_router, prefix=prefix)
     app.include_router(notebooks_router, prefix=prefix)
+    app.include_router(courses_router, prefix=prefix)
+    app.include_router(grading_router, prefix=prefix)
+    app.include_router(analytics_router, prefix=prefix)
 
     @app.get("/health", tags=["ops"])
     def health():

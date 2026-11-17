@@ -37,6 +37,7 @@ Demo accounts (development only, password `opencs-demo`):
 |---------------------------|--------------|
 | `student@opencs.local`    | student      |
 | `student2@opencs.local`   | student      |
+| `ta@opencs.local`         | course TA    |
 | `instructor@opencs.local` | instructor   |
 | `admin@opencs.local`      | administrator|
 

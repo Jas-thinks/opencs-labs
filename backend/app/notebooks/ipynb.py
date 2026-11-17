@@ -15,7 +15,43 @@ from app.core.config import settings
 NOTEBOOK_SUFFIX = ".ipynb"
 _UNSAFE = re.compile(r"[^A-Za-z0-9 ._-]+")
 _MAX_STEM = 90
+_MAX_DOCUMENT_BYTES = 8 * 1024 * 1024
 CONTAINER_DATASET_PREFIX = "/opt/opencs/datasets"
+
+
+def validate_document(document: object) -> dict:
+    """Return ``document`` if it is a structurally valid .ipynb v4 document.
+
+    Raises ``ValueError`` for anything that is not a notebook; the API layer
+    turns that into a 422/400 response. The size cap protects the database
+    from oversized autosave payloads.
+    """
+    if not isinstance(document, dict):
+        raise ValueError("notebook document must be a JSON object")
+    if document.get("nbformat") != 4:
+        raise ValueError("notebook document must use nbformat 4")
+    if not isinstance(document.get("cells"), list):
+        raise ValueError("notebook document must contain a cells array")
+    import json
+
+    encoded = json.dumps(document, ensure_ascii=False).encode("utf-8")
+    if len(encoded) > _MAX_DOCUMENT_BYTES:
+        raise ValueError("notebook document is too large")
+    try:
+        import warnings
+
+        notebook = nbformat.from_dict(document)
+        # Normalise first so notebooks authored before cell ids existed are
+        # still accepted, then validate the normalised copy.
+        from nbformat.validator import normalize
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            _, notebook = normalize(notebook)
+        nbformat.validate(notebook)
+    except nbformat.ValidationError as exc:
+        raise ValueError(f"invalid notebook document: {exc.message}") from exc
+    return document
 
 
 def localize_source(source: str) -> str:
