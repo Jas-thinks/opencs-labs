@@ -197,7 +197,7 @@ if SPAWNER == "local":
     c.Spawner.home_root = _home
     c.Spawner.cmd = [_env("OPENCE_SINGLEUSER_CMD", "jupyterhub-singleuser")]
     c.Spawner.default_url = "/lab"
-    c.Spawner.http_timeout = int(_env("OPENCE_SPAWN_HTTP_TIMEOUT", "60"))
+    c.Spawner.http_timeout = int(_env("OPENCE_SPAWN_HTTP_TIMEOUT", "180"))
     c.Spawner.start_timeout = int(_env("OPENCE_SPAWN_START_TIMEOUT", "120"))
     c.Spawner.notebook_dir = _home
 elif SPAWNER == "docker":
