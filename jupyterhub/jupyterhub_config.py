@@ -182,25 +182,24 @@ if SPAWNER == "local":
     # single OS user, so there is no cross-user kernel isolation. Documented in
     # docs/deployment/ rather than implied.
     #
-    # LocalProcessSpawner calls pwd.getpwnam(user.name) to find the home
-    # directory, which requires one OS account per Hub user. These targets have
-    # no per-student accounts, so pin the spawner to the service account
-    # (`user_id`/`group_ids`) and hand it an explicit home directory instead.
-    # Setting `user_id` is what makes JupyterHub skip the getpwnam lookup.
+    # OpenCSLocalSpawner calls pwd.getpwnam(user.name) in user_env(), which needs
+    # one OS account per Hub user. These targets have no per-student accounts.
     import pwd as _pwd
 
     _service_user = _env("OPENCE_HUB_SERVICE_USER", "") or _pwd.getpwuid(os.getuid()).pw_name
     _home = _env("OPENCE_NOTEBOOK_HOME", "/home/student/opencs-runtime/notebooks")
-    c.JupyterHub.spawner_class = "jupyterhub.spawner.LocalProcessSpawner"
+    # OpenCSLocalSpawner subclasses LocalProcessSpawner and removes the passwd
+    # lookup for the Hub username (see opencs_local_spawner.py). The stock
+    # spawner cannot run here because usernames like "student1" have no OS
+    # account on these targets.
+    c.JupyterHub.spawner_class = "opencs_local_spawner.OpenCSLocalSpawner"
+    c.Spawner.service_user = _service_user
+    c.Spawner.home_root = _home
     c.Spawner.cmd = [_env("OPENCE_SINGLEUSER_CMD", "jupyterhub-singleuser")]
     c.Spawner.default_url = "/lab"
     c.Spawner.http_timeout = int(_env("OPENCE_SPAWN_HTTP_TIMEOUT", "60"))
     c.Spawner.start_timeout = int(_env("OPENCE_SPAWN_START_TIMEOUT", "120"))
     c.Spawner.notebook_dir = _home
-    c.Spawner.user_id = _pwd.getpwnam(_service_user).pw_uid
-    c.Spawner.group_ids = [_pwd.getpwnam(_service_user).pw_gid]
-    c.Spawner.home_dir_template = _home
-    c.Spawner.env_keep = ["PATH", "HOME", "LANG", "LC_ALL", "JUPYTERHUB_*"]
 elif SPAWNER == "docker":
     c.JupyterHub.spawner_class = "dockerspawner.DockerSpawner"
     c.DockerSpawner.image = NOTEBOOK_IMAGE
