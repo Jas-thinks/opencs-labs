@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
+from app.core.config import settings
 from app.datasets.manifests import load_manifests
 from app.learning.models import LearningPath, Lesson, Module
 from app.practice.models import Exercise
@@ -203,7 +204,7 @@ def test_full_student_journey(student_client, real_curriculum):
     assert code["auto_execute"] is False
     assert code["cell_type"] == "code"
     assert "pd.read_csv" in code["code"]
-    assert code["path"] == "/opt/opencs/datasets/iris/v1/iris.csv"
+    assert code["path"] == f"{settings.dataset_mount_path.rstrip('/')}/iris/v1/iris.csv"
 
     # The student creates a notebook where they will paste the cell.
     personal = client.post("/api/v1/notebooks", json={"title": "My iris analysis"})
@@ -294,7 +295,7 @@ def test_every_dataset_snippet_is_valid_and_non_executing(student_client, real_c
         snippet = response.json()
         assert snippet["auto_execute"] is False
         assert snippet["read_only"] is True
-        assert snippet["path"].startswith("/opt/opencs/datasets/")
+        assert snippet["path"].startswith(f"{settings.dataset_mount_path.rstrip('/')}/")
         assert ".." not in snippet["path"]
 
 

@@ -19,7 +19,7 @@
   "source_url": "https://raw.githubusercontent.com/mwaskom/seaborn-data/master/titanic.csv",
   "attribution": "Original compilers: Vanderbilt University Department of Biostatistics; mirrored in seaborn-data.",
   "notes": "Source repository does not publish an explicit license. Confirm redistribution terms before production use.",
-  "generated_at": "2026-11-16T11:11:37.945382+00:00",
+  "generated_at": "2026-11-17T05:19:24.851649+00:00",
   "generator": "scripts/fetch_datasets.py",
   "versions": [
     {
@@ -180,7 +180,7 @@
           "alone": true
         }
       ],
-      "published_at": "2026-11-16T11:11:37.945369+00:00",
+      "published_at": "2026-11-17T05:19:24.851541+00:00",
       "transform": {
         "rows": 891,
         "source_rows": 891,

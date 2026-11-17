@@ -18,7 +18,7 @@
   "source_url": "https://raw.githubusercontent.com/mwaskom/seaborn-data/master/tips.csv",
   "attribution": "Bryant & Smith, mirrored in seaborn-data.",
   "notes": "Source repository does not publish an explicit license. Confirm redistribution terms before production use.",
-  "generated_at": "2026-11-16T11:11:41.999512+00:00",
+  "generated_at": "2026-11-17T05:20:43.942719+00:00",
   "generator": "scripts/fetch_datasets.py",
   "versions": [
     {
@@ -107,7 +107,7 @@
           "size": 4
         }
       ],
-      "published_at": "2026-11-16T11:11:41.999498+00:00",
+      "published_at": "2026-11-17T05:20:43.942690+00:00",
       "transform": {
         "rows": 244,
         "source_rows": 244,

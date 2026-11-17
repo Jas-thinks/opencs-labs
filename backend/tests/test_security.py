@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.core.config import settings
 from app.core.security import decode_session_token
 from tests.conftest import login
 
@@ -86,7 +87,7 @@ def test_dataset_catalogue_does_not_leak_filesystem_paths(student_client, datase
 
 def test_snippet_path_is_server_constructed(student_client, dataset):
     body = student_client.get("/api/v1/datasets/iris/snippet").json()
-    assert body["path"].startswith("/opt/opencs/datasets/")
+    assert body["path"].startswith(f"{settings.dataset_mount_path.rstrip('/')}/")
     assert ".." not in body["path"]
 
 

@@ -19,7 +19,7 @@
   "source_url": "https://raw.githubusercontent.com/ageron/handson-ml2/master/datasets/housing/housing.csv",
   "attribution": "Pace & Barry (1997), StatLib; CSV mirror maintained by Aurélien Géron (Apache-2.0 repository).",
   "notes": "Data originates from StatLib. The mirror repository is Apache-2.0; confirm data redistribution terms.",
-  "generated_at": "2026-11-16T11:11:40.253937+00:00",
+  "generated_at": "2026-11-17T05:20:42.953712+00:00",
   "generator": "scripts/fetch_datasets.py",
   "versions": [
     {
@@ -135,7 +135,7 @@
           "ocean_proximity": "NEAR BAY"
         }
       ],
-      "published_at": "2026-11-16T11:11:40.253925+00:00",
+      "published_at": "2026-11-17T05:20:42.953674+00:00",
       "transform": {
         "rows": 20640,
         "source_rows": 20640,

@@ -578,6 +578,8 @@ def main() -> int:
     # Write a catalogue index so the UI/backend can be checked without the DB.
     index = []
     for path in sorted(MANIFESTS.glob("*.json")):
+        if path.name == "index.json":
+            continue
         doc = json.loads(path.read_text())
         index.append(
             {

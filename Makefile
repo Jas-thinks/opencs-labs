@@ -1,9 +1,10 @@
 .PHONY: help venv install migrate seed fetch-datasets sync-datasets validate content \
-        backend frontend dev up down logs build-image loadtest \
+        backend frontend dev up down logs build-image loadtest notebook-venv local-notebooks \
         test test-backend test-frontend test-env test-security test-integration check clean
 
 PY := backend/.venv/bin/python
 PIP := backend/.venv/bin/pip
+NOTEBOOK_PY := .venv-notebook/bin/python
 API := http://localhost:8000
 WEB := http://localhost:5173
 SERVING := $(abspath datasets/serving)
@@ -23,6 +24,8 @@ help:
 	@echo "  make test             Backend + frontend test suites"
 	@echo "  make test-env         Notebook image environment smoke tests"
 	@echo "  make build-image      Build the pinned analytics notebook image"
+	@echo "  make notebook-venv    Create .venv-notebook from the analytics lock"
+	@echo "  make local-notebooks  Run the local JupyterLab server (host processes)"
 	@echo "  make loadtest         Staged load test against a running stack"
 	@echo "  make check            Everything CI runs: lint, types, tests, content"
 
@@ -71,6 +74,17 @@ logs:
 
 build-image:
 	notebook-image/build.sh --no-test
+
+# Host-process notebook environment: same pinned stack as the analytics image.
+notebook-venv:
+	@test -x $(NOTEBOOK_PY) || python3 -m venv .venv-notebook
+	$(NOTEBOOK_PY) -m pip install -q -r notebook-image/requirements.lock
+
+# Manual fallback; the backend normally auto-spawns this server on first use.
+local-notebooks:
+	$(NOTEBOOK_PY) -m jupyterlab --no-browser --ip=127.0.0.1 --port=8888 \
+		--ServerApp.root_dir=backend/data/local-notebooks \
+		--ServerApp.token= --ServerApp.password=
 
 test: test-backend test-frontend
 

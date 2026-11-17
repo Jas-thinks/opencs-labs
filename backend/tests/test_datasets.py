@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.core.config import settings
 from app.datasets.manifests import safe_relative_path
 from app.datasets.snippets import build_loading_snippet, dataset_absolute_path
 from tests.conftest import login
@@ -71,7 +72,7 @@ def test_snippet(student_client, dataset):
     assert body["auto_execute"] is False
     assert body["cell_type"] == "code"
     assert body["language"] == "python"
-    assert "/opt/opencs/datasets/iris/v1/iris.csv" in body["code"]
+    assert f"{settings.dataset_mount_path.rstrip('/')}/iris/v1/iris.csv" in body["code"]
     assert "pd.read_csv" in body["code"]
     assert body["code"].strip().endswith("df.head()")
 

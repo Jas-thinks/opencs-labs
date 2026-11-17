@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(python3 --version)",
+      "Shell(node --version)",
+      "Shell(npm:*)",
+      "Shell(docker:*)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

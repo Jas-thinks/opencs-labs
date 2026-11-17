@@ -18,6 +18,7 @@ prometheus-client==0.21.1
 python-multipart==0.0.20
 email-validator==2.2.0
 openpyxl==3.1.5
+scikit-learn==1.9.1
 
 # test tooling
 pytest==8.3.4

@@ -19,7 +19,7 @@
   "source_url": "https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page",
   "attribution": "New York City Taxi & Limousine Commission Trip Record Data.",
   "notes": "",
-  "generated_at": "2026-11-16T11:11:45.873468+00:00",
+  "generated_at": "2026-11-17T05:20:51.922899+00:00",
   "generator": "scripts/fetch_datasets.py",
   "versions": [
     {
@@ -135,7 +135,7 @@
           "payment_type": 1
         }
       ],
-      "published_at": "2026-11-16T11:11:45.873459+00:00",
+      "published_at": "2026-11-17T05:20:51.922881+00:00",
       "transform": {
         "rows": 20000,
         "source_rows": 2964624,

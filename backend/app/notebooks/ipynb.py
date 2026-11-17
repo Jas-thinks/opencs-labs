@@ -10,9 +10,26 @@ import unicodedata
 
 import nbformat
 
+from app.core.config import settings
+
 NOTEBOOK_SUFFIX = ".ipynb"
 _UNSAFE = re.compile(r"[^A-Za-z0-9 ._-]+")
 _MAX_STEM = 90
+CONTAINER_DATASET_PREFIX = "/opt/opencs/datasets"
+
+
+def localize_source(source: str) -> str:
+    """Point authored ``/opt/opencs/datasets`` literals at the configured path.
+
+    Lesson and exercise content is authored against the container mount. When
+    the backend runs on the host with ``OPENCE_DATASET_MOUNT_PATH`` set to the
+    repo's serving tree, generated cells must read from that path instead. In
+    container deployments the two paths are identical and this is a no-op.
+    """
+    mount = (settings.dataset_mount_path or "").rstrip("/")
+    if mount and mount != CONTAINER_DATASET_PREFIX:
+        return source.replace(CONTAINER_DATASET_PREFIX, mount)
+    return source
 
 
 def validate_file_name(name: str) -> str:
@@ -52,7 +69,7 @@ def unique_file_name(title: str, existing: set[str] | None = None) -> str:
 
 
 def code_cell(source: str, *, metadata: dict | None = None) -> dict:
-    cell = nbformat.v4.new_code_cell(source)
+    cell = nbformat.v4.new_code_cell(localize_source(source))
     cell["execution_count"] = None
     cell["outputs"] = []
     if metadata:

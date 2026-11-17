@@ -18,7 +18,7 @@
   "source_url": "https://scikit-learn.org/stable/datasets/toy_dataset.html#diabetes-dataset",
   "attribution": "Bundled with scikit-learn; original data from the diabetes study distributed with the package.",
   "notes": "Features are already mean-centred and scaled by scikit-learn. Do not re-scale blindly in lessons.",
-  "generated_at": "2026-11-16T11:11:41.126368+00:00",
+  "generated_at": "2026-11-17T05:22:55.718464+00:00",
   "generator": "scripts/fetch_datasets.py",
   "versions": [
     {
@@ -27,8 +27,8 @@
       "file": "diabetes.csv",
       "object_key": "diabetes/v1/diabetes.csv",
       "relative_mount_path": "diabetes/v1/diabetes.csv",
-      "sha256": "37445ec452084294acd1ff6f306cc0dc44e533fb158d790fcdc546be880b6e06",
-      "size_bytes": 95149,
+      "sha256": "657a9d35d7858f507f46edf723631c5b8cee302a0f1673fb91a6dc0c44414dfb",
+      "size_bytes": 95150,
       "row_count": 442,
       "columns": [
         {
@@ -143,7 +143,7 @@
           "disease_progression": 135.0
         }
       ],
-      "published_at": "2026-11-16T11:11:41.126359+00:00",
+      "published_at": "2026-11-17T05:22:55.718406+00:00",
       "transform": {
         "rows": 442,
         "source_rows": 442,

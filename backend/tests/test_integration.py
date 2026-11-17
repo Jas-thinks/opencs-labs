@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pytest
 
+from app.core.config import settings
+
 pytestmark = pytest.mark.integration
 
 
@@ -55,7 +57,7 @@ def test_dataset_snippet_never_auto_executes(student_client, dataset):
     assert body["cell_type"] == "code"
     assert "read_csv" in body["code"]
     assert body["read_only"] is True
-    assert body["path"].startswith("/opt/opencs/datasets/")
+    assert body["path"].startswith(f"{settings.dataset_mount_path.rstrip('/')}/")
 
 
 def test_notebook_crud_round_trip(student_client):

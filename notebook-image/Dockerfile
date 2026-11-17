@@ -21,7 +21,8 @@ FROM python:3.12-slim AS extension
 ARG NODE_VERSION=22.12.0
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates xz-utils \
- && curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+ && NODE_ARCH=$([ "$(uname -m)" = "aarch64" ] && echo arm64 || echo x64) \
+ && curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" \
       | tar -xJ -C /usr/local --strip-components=1 \
  && rm -rf /var/lib/apt/lists/*
 
@@ -137,12 +138,6 @@ WORKDIR /home/opencs/work
 EXPOSE 8888
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import urllib.request, urllib.error, sys; \
-url = 'http://127.0.0.1:8888/api'; \
-try: \
-    code = urllib.request.urlopen(url, timeout=3).status; \
-except urllib.error.HTTPError as exc: \
-    code = exc.code; \
-sys.exit(0 if code in (200, 302, 403) else 1)"
+    CMD curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:8888${JUPYTERHUB_SERVICE_PREFIX:-/}api" | grep -qE '^(200|302|403)$'
 
 CMD ["jupyterhub-singleuser", "--ip=0.0.0.0", "--port=8888"]

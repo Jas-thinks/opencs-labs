@@ -72,10 +72,16 @@ class Settings(BaseSettings):
     # what made every notebook write fail authorisation.
     jupyterhub_proxy_url: str = ""
     jupyterhub_public_url: str = "http://localhost:5173"
-    notebook_backend: Literal["hub", "disabled"] = "hub"
+    notebook_backend: Literal["hub", "local", "disabled"] = "hub"
     notebook_start_timeout_seconds: int = 120
     dataset_mount_path: str = "/opt/opencs/datasets"
     environment_image: str = "opencs/analytics:1.0.0"
+    # Local (host-process) notebook backend: one JupyterLab server rooted at
+    # local_notebooks_dir, spawned on first use by the backend.
+    local_notebooks_dir: str = str(REPO_ROOT / "backend" / "data" / "local-notebooks")
+    local_notebook_python: str = ""
+    local_notebook_host: str = "127.0.0.1"
+    local_notebook_port: int = 8888
 
     # --- object storage --------------------------------------------------
     s3_endpoint: str = ""
@@ -95,7 +101,7 @@ class Settings(BaseSettings):
     # --- grading ---------------------------------------------------------
     # docker     = local dev / single-host Compose (needs the Docker socket)
     # kubernetes = production (short-lived batch/v1 Job in the grader namespace)
-    grader: Literal["docker", "kubernetes", "disabled"] = "docker"
+    grader: Literal["docker", "kubernetes", "local", "disabled"] = "docker"
     grader_image: str = "opencs/analytics:1.0.0"
     grader_timeout_seconds: int = 90
     grader_memory: str = "1g"
@@ -111,6 +117,9 @@ class Settings(BaseSettings):
     # staged notebook/checks are visible to the grading container. Empty =
     # create a plain temp directory (correct when the backend runs on the host).
     grader_staging_dir: str = ""
+    # Local (host-process) grader: run grade_runner.py as a subprocess with the
+    # notebook environment's Python. No isolation beyond the runner's timeout.
+    grade_runner_path: str = str(REPO_ROOT / "notebook-image" / "grade_runner.py")
 
     # --- rate limiting ---------------------------------------------------
     rate_limit_enabled: bool = True
@@ -174,6 +183,15 @@ class Settings(BaseSettings):
             problems.append(
                 "OPENCE_GRADER=docker cannot work in a hardened production pod (no Docker "
                 "daemon); use OPENCE_GRADER=kubernetes or disabled"
+            )
+        if self.is_production and self.grader == "local":
+            problems.append(
+                "OPENCE_GRADER=local runs untrusted code without isolation; use "
+                "kubernetes or disabled in production"
+            )
+        if self.is_production and self.notebook_backend == "local":
+            problems.append(
+                "OPENCE_NOTEBOOK_BACKEND=local is development-only; use hub in production"
             )
         return problems
 

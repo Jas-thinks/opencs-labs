@@ -19,7 +19,7 @@
   "source_url": "https://github.com/plotly/datasets",
   "attribution": "Gapminder Foundation data, distributed in the plotly/datasets repository.",
   "notes": "",
-  "generated_at": "2026-11-16T11:11:42.460379+00:00",
+  "generated_at": "2026-11-17T05:20:44.430180+00:00",
   "generator": "scripts/fetch_datasets.py",
   "versions": [
     {
@@ -99,7 +99,7 @@
           "gdp_per_cap": 739.9811058
         }
       ],
-      "published_at": "2026-11-16T11:11:42.460370+00:00",
+      "published_at": "2026-11-17T05:20:44.430158+00:00",
       "transform": {
         "rows": 1704,
         "source_rows": 1704,

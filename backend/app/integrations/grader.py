@@ -29,6 +29,7 @@ import json
 import logging
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from contextlib import contextmanager
@@ -39,6 +40,7 @@ from typing import Any, Iterator, Protocol
 from app.core.config import settings
 from app.core.errors import UpstreamUnavailable
 from app.core.metrics import GRADER_LATENCY, GRADER_RUNS
+from app.notebooks.ipynb import localize_source
 
 logger = logging.getLogger("opencs.grader")
 
@@ -126,6 +128,32 @@ class DockerSandbox:
     def run(self, work: Path) -> tuple[str, str, int]:
         completed = subprocess.run(
             self.command(work),
+            capture_output=True,
+            text=True,
+            timeout=settings.grader_timeout_seconds + 30,
+            check=False,
+        )
+        return completed.stdout, completed.stderr, completed.returncode
+
+
+class LocalSandbox:
+    """Runs the grade runner as a host subprocess in the notebook environment.
+
+    Development only: student code executes as the same operating-system user
+    that runs the backend, with no container, network or resource isolation.
+    Timeouts come from the runner's SIGALRM budget and the subprocess timeout.
+    """
+
+    def __init__(self) -> None:
+        self.python = settings.local_notebook_python or sys.executable
+        self.runner = Path(settings.grade_runner_path)
+
+    def available(self) -> bool:
+        return Path(self.python).is_file() and self.runner.is_file()
+
+    def run(self, work: Path) -> tuple[str, str, int]:
+        completed = subprocess.run(  # noqa: S603 - admin-configured interpreter
+            [self.python, str(self.runner), str(work)],
             capture_output=True,
             text=True,
             timeout=settings.grader_timeout_seconds + 30,
@@ -292,9 +320,24 @@ class KubernetesSandbox:
 
 
 def _sandbox() -> Sandbox:
+    if settings.grader == "local":
+        return LocalSandbox()
     if settings.grader == "kubernetes":
         return KubernetesSandbox()
     return DockerSandbox()
+
+
+def _localize_notebook(notebook: dict[str, Any]) -> dict[str, Any]:
+    """Rewrite container dataset paths in a notebook copy before local grading."""
+    localized = json.loads(json.dumps(notebook))
+    for cell in localized.get("cells", []):
+        if cell.get("cell_type") != "code":
+            continue
+        source = cell.get("source", "")
+        if isinstance(source, list):
+            source = "".join(source)
+        cell["source"] = localize_source(source)
+    return localized
 
 
 @contextmanager
@@ -347,6 +390,9 @@ class NotebookGrader:
         }
         if not checks["tests"]:
             raise UpstreamUnavailable("This exercise has no automated checks configured")
+
+        if settings.grader == "local":
+            notebook = _localize_notebook(notebook)
 
         sandbox = self._sandbox or _sandbox()
         if not sandbox.available():

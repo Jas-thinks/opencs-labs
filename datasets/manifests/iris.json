@@ -19,7 +19,7 @@
   "source_url": "https://archive.ics.uci.edu/dataset/53/iris",
   "attribution": "R. A. Fisher (1936), distributed by the UCI Machine Learning Repository.",
   "notes": "",
-  "generated_at": "2026-11-16T11:11:37.440539+00:00",
+  "generated_at": "2026-11-17T05:19:24.604083+00:00",
   "generator": "scripts/fetch_datasets.py",
   "versions": [
     {
@@ -90,7 +90,7 @@
           "species": "setosa"
         }
       ],
-      "published_at": "2026-11-16T11:11:37.440525+00:00",
+      "published_at": "2026-11-17T05:19:24.604061+00:00",
       "transform": {
         "rows": 150,
         "source_rows": 150,
