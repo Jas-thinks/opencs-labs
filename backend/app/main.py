@@ -19,14 +19,17 @@ from sqlalchemy import text
 from app import __version__
 from app.analytics.router import router as analytics_router
 from app.auth.router import router as auth_router
+from app.core import telemetry
 from app.core.config import settings
+from app.core.db_timing import install_db_timing
 from app.core.errors import ApiError, api_error_handler, unhandled_error_handler
 from app.core.jobs import job_worker_loop
 from app.core.logging import RequestContextMiddleware, configure_logging
 from app.core.metrics import MetricsMiddleware, metrics_response
+from app.core.telemetry_middleware import TelemetryMiddleware
 from app.courses.router import router as courses_router
 from app.datasets.router import router as datasets_router
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, engine
 from app.grading.router import router as grading_router
 from app.learning.router import router as learning_router
 from app.notebooks.router import router as notebooks_router
@@ -59,6 +62,9 @@ async def lifespan(_: FastAPI):
 def create_app() -> FastAPI:
     configure_logging("DEBUG" if settings.debug else "INFO")
 
+    # Attribute query time to the request so Server-Timing can report db;dur.
+    install_db_timing(engine)
+
     problems = settings.validate_runtime()
     if problems:
         for problem in problems:
@@ -77,6 +83,7 @@ def create_app() -> FastAPI:
     )
 
     app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(TelemetryMiddleware)
     app.add_middleware(MetricsMiddleware)
     app.add_middleware(
         CORSMiddleware,
@@ -84,7 +91,7 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
-        expose_headers=["X-Request-ID"],
+        expose_headers=["X-Request-ID", "Server-Timing"],
     )
 
     app.add_exception_handler(ApiError, api_error_handler)
@@ -115,6 +122,10 @@ def create_app() -> FastAPI:
     @app.get("/metrics", tags=["ops"], include_in_schema=False)
     def metrics():
         return metrics_response()
+
+    @app.get("/telemetry", tags=["ops"], include_in_schema=False)
+    def telemetry_view():
+        return telemetry.telemetry_payload(settings.node_name, settings.node_role)
 
     @app.get(f"{prefix}/config", tags=["config"])
     def runtime_config():

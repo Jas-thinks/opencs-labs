@@ -15,6 +15,7 @@ from typing import Any
 
 import httpx
 
+from app.core import telemetry
 from app.core.config import settings
 from app.core.errors import CapacityExhausted, UpstreamUnavailable
 
@@ -57,6 +58,11 @@ class HubClient:
     # -- low level -----------------------------------------------------
     def _client(self) -> httpx.Client:
         headers = {"Authorization": f"token {self.token}"} if self.token else {}
+        # Propagate the request id so one browser request can be followed into
+        # the Hub's own logs and telemetry.
+        request_id = telemetry.current_request_id()
+        if request_id and request_id != "-":
+            headers["X-Request-ID"] = request_id
         return httpx.Client(base_url=self.api_url, headers=headers, timeout=self.timeout)
 
     def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
@@ -65,6 +71,7 @@ class HubClient:
                 "JupyterHub API token is not configured on the backend",
                 details={"hint": "set OPENCE_JUPYTERHUB_API_TOKEN"},
             )
+        started = time.perf_counter()
         try:
             with self._client() as client:
                 return client.request(method, path, **kwargs)
@@ -72,6 +79,9 @@ class HubClient:
             raise UpstreamUnavailable(
                 "JupyterHub is unreachable", details={"reason": str(exc)}
             ) from exc
+        finally:
+            # Attributed to the current request's Server-Timing (no-op outside one).
+            telemetry.add_hop("jupyter", (time.perf_counter() - started) * 1000)
 
     # -- users / servers ------------------------------------------------
     def ensure_user(self, username: str) -> None:

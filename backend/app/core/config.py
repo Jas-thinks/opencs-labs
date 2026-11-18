@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     env: Literal["development", "production", "test"] = "development"
     debug: bool = False
 
+    # --- telemetry -------------------------------------------------------
+    # Friendly identity reported by /telemetry and shown on the cluster dashboard.
+    node_name: str = "opencs-node"
+    node_role: Literal["central", "backend", "jupyter", "database", "worker"] = "backend"
+
     # --- session / security ---------------------------------------------
     jwt_secret: str = "dev-only-insecure-secret-change-me"
     jwt_issuer: str = "opencs"

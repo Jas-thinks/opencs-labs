@@ -8,4 +8,5 @@
 
 ## Infrastructure & Tooling
 
+- Wants all cross-host/browser-facing traffic addressed via the host's directly reachable mapped ports (`http://<HOST_IP>:<MAPPED_PORT>`), not internal Docker bridge IPs (`172.17.0.x`) and not SSH tunnels — pushes back when a design relies on tunnels between hosts. Expects zero internal-IP/`localhost` leaks in any URL returned to a client, and treats verifying that as part of "done". Confidence: 0.7
 - Does not want Docker in deployment designs: avoid Docker, DockerSpawner, Swarm, containers and Docker-socket approaches; prefer native systemd services, Python virtualenvs, Nginx, PostgreSQL and systemd-run sandboxing. Treats it as a hard, document-wide constraint (writes it as a "STRICT RULE" at the top of architecture docs), so it must be applied consistently in every doc/diagram/diagram legend he touches, not just the runbook. Confidence: 0.9
