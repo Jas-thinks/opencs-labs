@@ -9,16 +9,21 @@ which are **not**, without claiming more than was measured.
 
 | Service | Bound to | Reachable from | Verified |
 |---|---|---|---|
-| nginx `:80` | `0.0.0.0` (container) | docker bridge `172.17.0.0/16` | yes |
+| nginx LB `:5000` (sys1) | `0.0.0.0` (container) | `http://10.1.75.53:5305` | yes |
+| nginx frontend `:6000` (sys2) | `0.0.0.0` (container) | `http://10.1.75.53:6306` | yes |
+| uvicorn `:5000` (backends) | `0.0.0.0` (container) | `http://10.1.75.53:5307/5308/5253` | yes |
+| JupyterHub `:5000` (.79 nodes) | `0.0.0.0` (container) | `http://10.1.75.79:5221-5224` | yes |
 | PostgreSQL `:5432` | `0.0.0.0` (container) | `172.17.0.0/16` per `pg_hba.conf` | yes |
-| uvicorn `:8000` | `0.0.0.0` (container) | `172.17.0.0/16` | yes |
-| JupyterLab `:8888` | `localhost` | loopback only | yes |
-| SSH | host mapping | `2305-2308` | yes |
+| SSH | host mapping | `.53:2305-2308,2253-2256`, `.79:2221-2224` | yes |
 
-**From outside the host, ports 80/443/8000/5173/5432/9000 are all closed.**
-Measured by direct TCP connect from the operator workstation. Only the SSH
-ports are published. There is therefore no public attack surface for the web
-application — and also no public URL (§5).
+The host publishes **mapped HTTP ports** for internal listeners: internal
+`5000` → `5<XYZ>`, `6000` → `6<XYZ>`, `8000` → `8<XYZ>`, where `<XYZ>` is the
+node suffix of its SSH port. All browser traffic uses those URLs.
+
+**The web application now has directly reachable URLs** (no SSH tunnel), but
+still **no TLS and no domain** — so it is plain HTTP with `Secure` cookies
+disabled (§5). Exposing it beyond the campus network requires TLS termination at
+an institutional reverse proxy.
 
 ## 2. Controls correctly in place
 
@@ -93,18 +98,24 @@ No `iptables`/`ufw` rules were added or changed. Rationale:
 If HTTP is ever published, the minimum rule set is: allow 80/443, allow the
 SSH ports, deny 5432/8000/8888 from outside the app network.
 
-## 5. No public URL
+## 5. URLs and the missing TLS
 
-Stated plainly because it is a deliverable that does **not** exist:
+The application is directly reachable at mapped host ports:
 
-- no domain was supplied,
-- the host publishes no HTTP port,
-- the LB is reachable only at `172.17.0.22:80` from inside the docker network.
+- Frontend: `http://10.1.75.53:6306`
+- Load balancer: `http://10.1.75.53:5305`
+- Backends: `http://10.1.75.53:5307`, `:5308`, `:5253`
+- JupyterHub: `http://10.1.75.79:5221`–`:5224`
 
-Verification was therefore performed from `stu87_sys1` against
-`http://127.0.0.1` and from `stu87_sys2` against `http://172.17.0.22`. A real
-public URL requires either a published port on the host or an institutional
-reverse proxy in front of it. Neither exists.
+There is still **no domain and no certificate**, so:
+
+- traffic is plain HTTP; anyone on the network path can read it,
+- the session cookie is not `Secure`,
+- do not expose these ports to the public internet without a TLS-terminating
+  reverse proxy in front.
+
+Verification was performed directly against the mapped URLs from the operator
+workstation and from the `.53` containers; no SSH tunnel was used.
 
 ## 6. Credential exposure that predates this work
 

@@ -26,38 +26,51 @@ Deployment is therefore entirely native:
 
 ## 2. Topology actually deployed
 
+Every service is reached through the host's **mapped ports** — no SSH tunnels,
+no internal bridge IPs in any browser-facing URL.
+
 ```
-                     (no published HTTP port — see §6)
-                                │
-                    ┌───────────▼────────────┐
-                    │  stu87_sys1  172.17.0.22│
-                    │  ─────────────────────  │
-                    │  nginx :80  (LB + SPA)  │
-                    │  PostgreSQL 16 :5432    │
-                    └───┬────────┬────────┬───┘
-                        │        │        │   round-robin, max_fails=3
-        ┌───────────────▼──┐  ┌──▼─────────────┐  ┌──▼──────────────┐
-        │ stu87_sys2       │  │ stu87_sys3     │  │ stu87_sys4      │
-        │ 172.17.0.61:8000 │  │ 172.17.0.57    │  │ 172.17.0.39     │
-        │ uvicorn (1 worker)│ │ uvicorn        │  │ uvicorn         │
-        │ + JupyterLab :8888│ │ + JupyterLab   │  │ + JupyterLab    │
-        └──────────────────┘  └────────────────┘  └─────────────────┘
-                 │                    │                   │
-                 └────────────────────┴───────────────────┘
-                             all read/write
-                        PostgreSQL @ 172.17.0.22:5432
+                http://10.1.75.53:6306  (frontend: SPA + /api proxy)
+                              │
+                http://10.1.75.53:5305  (load balancer)
+                 │            │            │
+   :5307 ────────┘   :5308 ───┘   :5253 ───┘   (3 backends, external mapped ports)
+     │                │             │
+     └────────────────┴─────────────┴──► PostgreSQL 172.17.0.56:5432 (server-to-server)
+                                             ├── db-2 sync standby
+                                             └── db-3 async replica
+     │
+     └──► http://10.1.75.79:5221 / 5222 / 5223 / 5224   (4 JupyterHub nodes)
 ```
+
+### Port-mapping rule
+
+SSH is `student@<HOST_IP> -p 2<XYZ>`. Internal port `P` is published at
+`http://<HOST_IP>:<first digit of P><XYZ>`:
+
+- internal `5000` → `5<XYZ>` (e.g. SSH `2306` → `10.1.75.53:5306`)
+- internal `6000` → `6<XYZ>` (e.g. SSH `2306` → `10.1.75.53:6306`)
+- internal `8000` → `8<XYZ>` (e.g. SSH `2221` → `10.1.75.79:8221`)
+
+JupyterHub runs on internal **`5000`** (not `8000`) so `http://10.1.75.79:52<XYZ>`
+serves it directly.
 
 ### Machine-to-service table
 
-| Endpoint | Host | Role | Services | Port |
-|---|---|---|---|---|
-| `.53:2305` | sys1 | Load balancer + DB | nginx, PostgreSQL 16 | 80, 5432 |
-| `.53:2306` | sys2 | Backend 1 | uvicorn, JupyterLab | 8000, 8888 |
-| `.53:2307` | sys3 | Backend 2 | uvicorn, JupyterLab | 8000, 8888 |
-| `.53:2308` | sys4 | Backend 3 | uvicorn, JupyterLab | 8000, 8888 |
-| `.79:2221-2224` | — | **not deployed** | no credentials | — |
-| `.53:2253-2256` | — | **not deployed** | no credentials | — |
+| Endpoint | Host | Role | Services | Internal port | External URL |
+|---|---|---|---|---|---|
+| `.53:2305` | sys1 | Load balancer | nginx | 5000 | `http://10.1.75.53:5305` |
+| `.53:2306` | sys2 | Frontend | nginx + SPA | 6000 | `http://10.1.75.53:6306` |
+| `.53:2307` | sys3 | Backend 1 | uvicorn | 5000 | `http://10.1.75.53:5307` |
+| `.53:2308` | sys4 | Backend 2 | uvicorn | 5000 | `http://10.1.75.53:5308` |
+| `.53:2253` | stu74_sys1 | Backend 3 | uvicorn | 5000 | `http://10.1.75.53:5253` |
+| `.53:2254` | stu74_sys2 | Database primary | PostgreSQL 16 | 5432 | `10.1.75.53:5254` (DB) |
+| `.53:2255` | stu74_sys3 | Database sync standby | PostgreSQL 16 | 5432 | mapping not published |
+| `.53:2256` | stu74_sys4 | Database async replica | PostgreSQL 16 | 5432 | `10.1.75.53:5256` (DB) |
+| `.79:2221` | stu36_sys1 | JupyterHub 1 | Hub + CHP | 5000 / 8081 | `http://10.1.75.79:5221` |
+| `.79:2222` | stu36_sys2 | JupyterHub 2 | Hub + CHP | 5000 / 8081 | `http://10.1.75.79:5222` |
+| `.79:2223` | stu36_sys3 | JupyterHub 3 | Hub + CHP | 5000 / 8081 | `http://10.1.75.79:5223` |
+| `.79:2224` | stu36_sys4 | JupyterHub 4 | Hub + CHP | 5000 / 8081 | `http://10.1.75.79:5224` |
 
 ## 3. Why the database is a single node
 
@@ -80,30 +93,35 @@ database host to replicate to. Stated plainly rather than glossed over.
 ## 4. Notebook execution — the central limitation
 
 The HLD specifies JupyterHub + KubeSpawner + Kubernetes, one isolated pod per
-student. None of that exists here:
+student. None of that exists here (no Kubernetes, no Docker, no systemd), so
+JupyterHub cannot spawn pods.
 
-- no Kubernetes, no Docker, no systemd,
-- so JupyterHub cannot spawn per-user servers.
+Instead, **four JupyterHub instances run natively** on the `.79` nodes, each
+with `OpenCSLocalSpawner` (a subclass of `LocalProcessSpawner` that resolves a
+per-user home directory without requiring an OS account per Hub user). Three
+backends are paired with a Hub for notebook work, and every Hub is reachable at
+its own external mapped URL:
 
-The application therefore runs `OPENCE_NOTEBOOK_BACKEND=local`: a **single
-host-process JupyterLab per backend container**, rooted at
-`~/opencs-runtime/notebooks`, with each user's notebooks in a subdirectory.
-The application itself documents this backend as development-only and
-explicitly notes *"There is no per-user isolation: every notebook server,
-kernel and the backend run as the same user."*
+| Hub | External URL |
+|---|---|
+| `stu36_sys1` | `http://10.1.75.79:5221` |
+| `stu36_sys2` | `http://10.1.75.79:5222` |
+| `stu36_sys3` | `http://10.1.75.79:5223` |
+| `stu36_sys4` | `http://10.1.75.79:5224` |
 
-What works (verified, see the test report):
+What works (verified):
 
-- notebook create/list/open/download,
+- notebook create/list/open/download through the external URL,
 - autosave with content hashing and versions,
-- real Python kernels executing pandas against the deployed datasets.
+- real Python kernels executing pandas (`EXTERNAL_KERNEL_OK 3.1.1` on all four
+  Hubs, reached over the mapped ports),
+- returned notebook URLs are external, e.g.
+  `http://10.1.75.79:5223/user/student1/lab/tree/...` with no `172.17.0.x`.
 
 What does not:
 
-- per-user kernel isolation (all users share one JupyterLab per node),
-- resource-limited per-student sandboxes,
-- WebSocket proxying from the browser through the LB (the local backend serves
-  JupyterLab on `localhost:8888` and there is no Hub proxy to mount it).
+- per-user kernel isolation (all Hub users share one OS account),
+- resource-limited per-student sandboxes (one cgroup per container).
 
 ## 5. Grading
 
@@ -113,11 +131,14 @@ that is accurate and is documented, not hidden.
 
 ## 6. Network reality
 
-- Only SSH ports (2305-2308) are published from the host.
-- Ports 80, 443, 8000, 5173 are **closed from outside** the host.
-- There is no domain, so no TLS and no `Secure` cookies.
-- Consequence: **no public URL exists.** All verification runs inside the
-  docker network from `172.17.0.22`.
+- SSH ports are the administrative entry point: `.53:2305-2308`,`.53:2253-2256`,
+  `.79:2221-2224`.
+- The host **also publishes mapped HTTP ports** for internal listeners:
+  `5<XYZ>`, `6<XYZ>`, `8<XYZ>` (see the port-mapping rule above). Those are the
+  URLs the browser and the backends use.
+- There is no domain and no TLS, so there are no `Secure` cookies.
+- No SSH tunnels are required: `http://10.1.75.79:5221` is reachable from both
+  the operator machine and from the `.53` containers.
 
 See [`NETWORK_AND_SECURITY.md`](NETWORK_AND_SECURITY.md).
 

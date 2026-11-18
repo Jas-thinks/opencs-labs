@@ -36,3 +36,6 @@ notebook-image/*.tar
 .DS_Store
 .idea/
 .vscode/
+
+# Contains plaintext SSH credentials — never commit
+Systems.md
