@@ -105,3 +105,31 @@ The biggest lever for notebook capacity is more cgroup memory on the stu36 conta
 - **No OS isolation between users on a shard.** All users share one account, with one directory each.
 - **Host A is a single physical machine.** The off-host backup on Host B is the only protection against losing it.
 - **The NYC-taxi dataset is not built.** Its CloudFront source resets connections from this network.
+
+## Measured on 2026-11-19 (release c5742ef + 3db8980)
+
+Latency was measured from inside the cluster with 200-sample runs, unless a row says otherwise.
+
+| Path | p50 | p95 |
+|---|---|---|
+| SPA `index.html` at the edge | 1.0 ms | 1.4 ms |
+| `GET /api/v1/me`, authenticated (edge → API → PG) | 14.0 ms | 18.3 ms |
+| `GET /api/v1/datasets` (catalogue) | 29.2 ms | 35.2 ms |
+| Edge → Hub shard health, cross-host | ~15 ms | |
+| Notebook spawn (local spawner, cold) | 5.7 s | |
+| Kernel `1+1` round trip, browser → edge → shard | 56 ms | 63 ms |
+| Same, direct on the shard (no network) | 52 ms | |
+
+Notes on these numbers:
+- The API backend reports about 13.5 ms of Python plus about 2.4 ms of DB per `/me` (`Server-Timing`). The nodes' cores are about 1.5× slower than a typical laptop.
+- The edge and the cross-host hop add about 3 ms to notebook traffic. The rest is jupyter-server plus ipykernel 6.31 on one core. A raw kernel round trip takes 24 ms on a shard versus 10.6 ms on a laptop running ipykernel 7.
+- Load balancing over 40 requests split 10/10/10/10 across the four API nodes.
+
+Failure drills:
+
+| Drill | Result |
+|---|---|
+| SIGKILL an API mid-load (400 requests) | 400/400 returned 200 (edge retry). The supervisor restarted it in 3 s. |
+| Stop an API and a Hub entirely (simulated container restart) | The watchdog restarted both. Healthy again in about 60 s. |
+| Stop the standby PostgreSQL | The watchdog started it in 52 s, and streaming resumed with about 1 ms lag. |
+| Primary PostgreSQL failover | **Not drilled.** It needs a rebuild afterwards; see the runbook above. |
