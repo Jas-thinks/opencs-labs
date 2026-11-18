@@ -19,15 +19,17 @@ import pwd
 from typing import Any
 
 from jupyterhub.spawner import LocalProcessSpawner
+from traitlets import Unicode
 
 
 class OpenCSLocalSpawner(LocalProcessSpawner):
     """LocalProcessSpawner that never looks a Hub user up in passwd."""
 
-    #: OS account that owns the spawned servers.
-    service_user: str = ""
-    #: Root directory holding one subdirectory per Hub user.
-    home_root: str = ""
+    # Real traitlets: as plain class attributes, `c.Spawner.home_root = ...` in
+    # jupyterhub_config.py was silently ignored, so homes were created under the
+    # fallback path while notebook_dir pointed at the configured one.
+    service_user = Unicode("", config=True, help="OS account that owns the spawned servers")
+    home_root = Unicode("", config=True, help="Root directory holding one subdirectory per Hub user")
 
     def _service_pw(self) -> pwd.struct_passwd:
         name = self.service_user or pwd.getpwuid(os.getuid()).pw_name

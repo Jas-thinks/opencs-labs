@@ -251,8 +251,8 @@ if SPAWNER == "local":
     # spawner cannot run here because usernames like "student1" have no OS
     # account on these targets.
     c.JupyterHub.spawner_class = "opencs_local_spawner.OpenCSLocalSpawner"
-    c.Spawner.service_user = _service_user
-    c.Spawner.home_root = _home
+    c.OpenCSLocalSpawner.service_user = _service_user
+    c.OpenCSLocalSpawner.home_root = _home
     c.Spawner.cmd = [_env("OPENCE_SINGLEUSER_CMD", "jupyterhub-singleuser")]
     c.Spawner.default_url = "/lab"
     c.Spawner.http_timeout = int(_env("OPENCE_SPAWN_HTTP_TIMEOUT", "180"))
@@ -361,8 +361,12 @@ c.JupyterHub.shutdown_on_logout = False
 # --------------------------------------------------------------------------- #
 c.Spawner.default_url = "/lab"
 c.Spawner.debug = False
-c.Spawner.start_timeout = 300
-c.Spawner.http_timeout = 60
+# Defaults for the pod spawners only: the local spawner block above sets its
+# own (OPENCE_SPAWN_*), and these unconditional assignments used to override
+# them - a 60 s HTTP timeout is too short for JupyterLab on a 1-CPU node.
+if SPAWNER != "local":
+    c.Spawner.start_timeout = 300
+    c.Spawner.http_timeout = 60
 
 if SPAWNER == "kubernetes":
     # KubeSpawner traitlets (production). In DockerSpawner mode these belong to
