@@ -9,9 +9,9 @@ from __future__ import annotations
 import time
 
 from prometheus_client import Counter, Gauge, Histogram, generate_latest
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 REQUEST_COUNT = Counter(
     "opencs_http_requests_total",
@@ -55,21 +55,33 @@ def _route_template(request: Request) -> str:
     return getattr(route, "path", request.url.path)
 
 
-class MetricsMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        if request.url.path in ("/metrics", "/health", "/healthz"):
-            return await call_next(request)
+class MetricsMiddleware:
+    """Prometheus request counters, as plain ASGI middleware (see logging.py)."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope.get("path") in ("/metrics", "/health", "/healthz"):
+            await self.app(scope, receive, send)
+            return
         started = time.perf_counter()
-        status_code = 500
+        status = 500
+
+        async def send_recording(message: Message) -> None:
+            nonlocal status
+            if message["type"] == "http.response.start":
+                status = message["status"]
+            await send(message)
+
         try:
-            response = await call_next(request)
-            status_code = response.status_code
-            return response
+            await self.app(scope, receive, send_recording)
         finally:
-            elapsed = time.perf_counter() - started
-            route = _route_template(request)
-            REQUEST_COUNT.labels(request.method, route, str(status_code)).inc()
-            REQUEST_LATENCY.labels(request.method, route).observe(elapsed)
+            # The router stores the matched route in the (shared) scope dict.
+            route = getattr(scope.get("route"), "path", scope.get("path", ""))
+            method = scope.get("method", "")
+            REQUEST_COUNT.labels(method, route, str(status)).inc()
+            REQUEST_LATENCY.labels(method, route).observe(time.perf_counter() - started)
 
 
 def _telemetry_exposition() -> str:

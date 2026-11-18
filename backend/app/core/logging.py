@@ -9,8 +9,8 @@ import time
 import uuid
 from contextvars import ContextVar
 
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 request_id_ctx: ContextVar[str] = ContextVar("request_id", default="-")
 user_ctx: ContextVar[str] = ContextVar("user", default="-")
@@ -48,29 +48,55 @@ def configure_logging(level: str = "INFO") -> None:
 access_logger = logging.getLogger("opencs.access")
 
 
-class RequestContextMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:16]
+def header_value(scope: Scope, name: bytes) -> str | None:
+    """First value of a request header from the raw ASGI scope (lower-case name)."""
+    for key, value in scope.get("headers", ()):
+        if key == name:
+            return value.decode("latin-1")
+    return None
+
+
+class RequestContextMiddleware:
+    """Request id + access log, as plain ASGI middleware.
+
+    Starlette's ``BaseHTTPMiddleware`` runs the downstream app in a separate
+    task with memory streams for every request; with three such layers that was
+    a measurable share of each request on a 1-CPU node. Behaviour is unchanged.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        request_id = header_value(scope, b"x-request-id") or uuid.uuid4().hex[:16]
         token = request_id_ctx.set(request_id)
         started = time.perf_counter()
-        response = None
+        status = 500
+
+        async def send_with_id(message: Message) -> None:
+            nonlocal status
+            if message["type"] == "http.response.start":
+                status = message["status"]
+                MutableHeaders(scope=message)["x-request-id"] = request_id
+            await send(message)
+
         try:
-            response = await call_next(request)
-            return response
+            await self.app(scope, receive, send_with_id)
         finally:
-            duration_ms = round((time.perf_counter() - started) * 1000, 2)
-            if not request.url.path.startswith(("/metrics", "/health")):
+            path = scope.get("path", "")
+            if not path.startswith(("/metrics", "/health")):
+                client = scope.get("client")
                 access_logger.info(
                     "request",
                     extra={
-                        "method": request.method,
-                        "path": request.url.path,
-                        "status": getattr(response, "status_code", 500),
-                        "duration_ms": duration_ms,
-                        "client": request.client.host if request.client else "-",
+                        "method": scope.get("method"),
+                        "path": path,
+                        "status": status,
+                        "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                        "client": client[0] if client else "-",
                     },
                 )
-            response_headers = getattr(response, "headers", None)
-            if response_headers is not None:
-                response_headers["x-request-id"] = request_id
             request_id_ctx.reset(token)

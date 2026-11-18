@@ -278,8 +278,9 @@ cmd_verify() {
   curl -fsS -o /dev/null -H 'Accept-Encoding: gzip' -w "  asset(gz)  %{http_code} %{size_download}B %{time_total}s\n" "$o$js"
   for i in 0 1 2 3; do curl -fsS -o /dev/null -w "  /nb/$i      %{http_code} %{time_total}s\n" "$o/nb/$i/hub/health"; done
   say "API spread over 40 requests (upstream per request from the edge log)"
-  for _ in $(seq 40); do curl -fsS -o /dev/null "$o/health"; done
-  r edge "sleep 6; tail -n 200 $ROOT/logs/edge.access.log | grep 'GET /health' | tail -40 | grep -o 'up=[0-9.:]*' | sort | uniq -c"
+  # /health is not access-logged at the edge; an unauthenticated /me (401) is.
+  for _ in $(seq 40); do curl -sS -o /dev/null "$o/api/v1/me"; done
+  r edge "sleep 6; tail -n 300 $ROOT/logs/edge.access.log | grep 'GET /api/v1/me ' | tail -40 | grep -o 'up=[0-9.:]*' | sort | uniq -c"
   say "login + authenticated call"
   local jar; jar=$(mktemp)
   curl -fsS -c "$jar" -H 'Content-Type: application/json' -d '{"email":"student@opencs.local","password":"opencs-demo"}' -o /dev/null -w "  login      %{http_code} %{time_total}s\n" "$o/api/v1/auth/login"
@@ -291,7 +292,7 @@ cmd_rollout() {
   cmd_release
   say "rolling restart: one API at a time, edge keeps serving from the others"
   local a; for a in $(aliases api); do
-    r "$a" "bash $ROOT/bin/opencs.sh restart api && for i in \$(seq 60); do curl -fsS -o /dev/null http://127.0.0.1:8000/health && echo healthy && exit 0; sleep 1; done; exit 1"
+    r "$a" "bash $ROOT/bin/opencs.sh restart api && for i in \$(seq 60); do curl -fsS -o /dev/null http://127.0.0.1:8000/health && { for w in 1 2 3; do curl -s -o /dev/null http://127.0.0.1:8000/api/v1/me; done; echo healthy+warm; exit 0; }; sleep 1; done; exit 1"
   done
   r ctl "bash $ROOT/bin/opencs.sh restart worker"
   each "$(aliases hub)" _start   # idempotent: a running Hub keeps its users

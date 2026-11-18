@@ -10,50 +10,62 @@ from __future__ import annotations
 import time
 import uuid
 
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core import telemetry
-from app.core.logging import request_id_ctx
+from app.core.logging import header_value, request_id_ctx
 
 
-def _route_label(request: Request) -> str:
+def _route_label(scope: Scope) -> str:
     """Prefer the route template (``/api/v1/notebooks/{id}``) over the raw path."""
-    scope_route = request.scope.get("route")
-    template = getattr(scope_route, "path", None)
-    if template:
-        return template
-    return request.url.path
+    template = getattr(scope.get("route"), "path", None)
+    return template or scope.get("path", "")
 
 
-class TelemetryMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
+class TelemetryMiddleware:
+    """Server-Timing + per-route percentiles, as plain ASGI middleware.
+
+    The hop breakdown is finalised when the response *starts*, because that is
+    when the Server-Timing header is written; for every non-streaming response
+    the endpoint (and its db/jupyter hops) has completed by then.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
         # Reuse an upstream id (the load balancer mints one) or make our own.
-        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:16]
+        request_id = header_value(scope, b"x-request-id") or uuid.uuid4().hex[:16]
         token = request_id_ctx.set(request_id)
         telemetry.begin_request()
-        started = time.perf_counter()
+        result: dict = {}
 
-        response = None
-        try:
-            response = await call_next(request)
-            return response
-        finally:
-            status = getattr(response, "status_code", 500)
-            total_ms, hops = telemetry.end_request()
-
-            if response is not None:
-                response.headers["x-request-id"] = request_id
+        async def send_with_timing(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                total_ms, hops = telemetry.end_request()
+                result.update(status=message["status"], total_ms=total_ms, hops=hops)
+                headers = MutableHeaders(scope=message)
+                headers["x-request-id"] = request_id
                 # Two Server-Timing headers are legal and combine; the LB adds lb;dur.
-                response.headers["server-timing"] = telemetry.format_server_timing(hops)
+                headers["server-timing"] = telemetry.format_server_timing(hops)
+            await send(message)
 
-            if telemetry.route_is_instrumented(request.url.path):
-                label = _route_label(request)
-                telemetry.routes.observe(label, total_ms, status)
+        try:
+            await self.app(scope, receive, send_with_timing)
+        finally:
+            if not result:  # failed before a response started
+                total_ms, hops = telemetry.end_request()
+                result.update(status=500, total_ms=total_ms, hops=hops)
+            path = scope.get("path", "")
+            if telemetry.route_is_instrumented(path):
+                telemetry.routes.observe(_route_label(scope), result["total_ms"], result["status"])
                 for hop in ("db", "jupyter"):
-                    if hop in hops:
-                        telemetry.observe_hop(hop, hops[hop])
-
+                    if hop in result["hops"]:
+                        telemetry.observe_hop(hop, result["hops"][hop])
             request_id_ctx.reset(token)
 
 
