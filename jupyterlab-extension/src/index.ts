@@ -13,6 +13,7 @@ import {
 } from '@jupyterlab/application';
 import { IMainMenu } from '@jupyterlab/mainmenu';
 import { INotebookTracker } from '@jupyterlab/notebook';
+import { ISettingRegistry } from '@jupyterlab/settingregistry';
 import { Menu, Widget } from '@lumino/widgets';
 
 const PLUGIN_ID = '@opencs/datasets:plugin';
@@ -443,12 +444,14 @@ const plugin: JupyterFrontEndPlugin<void> = {
     'Insert OpenCS dataset loading cells into the active notebook. Cells are never auto-executed.',
   autoStart: true,
   requires: [INotebookTracker, IMainMenu],
-  optional: ['@jupyterlab/settingregistry:settingRegistry'],
+  // Must be the token object: a plain string is not a valid Token and fails
+  // type-checking, which kept this extension from building at all.
+  optional: [ISettingRegistry],
   activate: (
     app: JupyterFrontEnd,
     tracker: INotebookTracker,
     mainMenu: IMainMenu,
-    settingRegistry?: any
+    settingRegistry: ISettingRegistry | null
   ) => {
     void configureAutosave(settingRegistry);
 

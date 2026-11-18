@@ -1,0 +1,30 @@
+{
+  "_comment": "Single source of truth for the 12-node deployment. No secrets here. Internal IPs are docker-bridge addresses measured 2026-11-19; they are stable for a container's lifetime but NOT static - re-measure (deploy.sh discover) after any container recreate. Host A and Host B have separate bridges with overlapping 172.17.0.x ranges: never use an internal IP across hosts.",
+  "user": "student",
+  "public_origin": "http://10.1.75.53:5305",
+  "standby_origin": "http://10.1.75.53:5256",
+  "nodes": [
+    {"alias": "edge",  "name": "stu87_sys1", "host": "10.1.75.53", "ssh_port": 2305, "ip": "172.17.0.22", "role": "edge"},
+    {"alias": "api1",  "name": "stu87_sys2", "host": "10.1.75.53", "ssh_port": 2306, "ip": "172.17.0.61", "role": "api", "pypi": true},
+    {"alias": "api2",  "name": "stu87_sys3", "host": "10.1.75.53", "ssh_port": 2307, "ip": "172.17.0.57", "role": "api", "pypi": true},
+    {"alias": "api3",  "name": "stu87_sys4", "host": "10.1.75.53", "ssh_port": 2308, "ip": "172.17.0.39", "role": "api", "pypi": true},
+    {"alias": "api4",  "name": "stu74_sys1", "host": "10.1.75.53", "ssh_port": 2253, "ip": "172.17.0.76", "role": "api", "pypi": false},
+    {"alias": "pg1",   "name": "stu74_sys2", "host": "10.1.75.53", "ssh_port": 2254, "ip": "172.17.0.56", "role": "pg-primary"},
+    {"alias": "pg2",   "name": "stu74_sys3", "host": "10.1.75.53", "ssh_port": 2255, "ip": "172.17.0.33", "role": "pg-standby"},
+    {"alias": "ctl",   "name": "stu74_sys4", "host": "10.1.75.53", "ssh_port": 2256, "ip": "172.17.0.72", "role": "control", "pypi": false, "public_port": 5256},
+    {"alias": "nb0",   "name": "stu36_sys1", "host": "10.1.75.79", "ssh_port": 2221, "role": "hub", "shard": 0, "public_port": 5221},
+    {"alias": "nb1",   "name": "stu36_sys2", "host": "10.1.75.79", "ssh_port": 2222, "role": "hub", "shard": 1, "public_port": 5222},
+    {"alias": "nb2",   "name": "stu36_sys3", "host": "10.1.75.79", "ssh_port": 2223, "role": "hub", "shard": 2, "public_port": 5223},
+    {"alias": "nb3",   "name": "stu36_sys4", "host": "10.1.75.79", "ssh_port": 2224, "role": "hub", "shard": 3, "public_port": 5224}
+  ],
+  "tuning": {
+    "api_port": 8000,
+    "db_pool_size": 5,
+    "db_max_overflow": 5,
+    "pg_max_connections": 60,
+    "hub_active_server_limit": 2,
+    "hub_idle_timeout_seconds": 900,
+    "max_active_sessions": 8,
+    "backup_offhost_alias": "nb3"
+  }
+}

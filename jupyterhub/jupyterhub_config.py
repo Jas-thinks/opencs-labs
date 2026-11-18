@@ -157,12 +157,27 @@ IDLE_CULL_EVERY_SECONDS = int(_env("OPENCE_IDLE_CULL_EVERY_SECONDS", "600"))
 # --------------------------------------------------------------------------- #
 c.JupyterHub.bind_url = BIND_URL
 
+# Path prefix for a sharded deployment. Each Hub shard is served by the edge
+# under its own prefix (/nb/0/, /nb/1/, ...) on the application's origin, so the
+# OpenCS session cookie reaches /hub/login (single sign-on) and the JupyterLab
+# extension's credentialed calls to /api/v1 are same-origin. Hub and per-user
+# cookies are path-scoped to the prefix, so shards never collide.
+HUB_BASE_URL = _env("OPENCE_HUB_BASE_URL", "/")
+if not HUB_BASE_URL.endswith("/"):
+    HUB_BASE_URL += "/"
+c.JupyterHub.base_url = HUB_BASE_URL
+
+# Cap on concurrently running user servers on this Hub; 0 = unlimited. Beyond
+# it the Hub answers 429 and the backend reports "capacity exhausted" instead of
+# letting one more kernel OOM a memory-capped node.
+c.JupyterHub.active_server_limit = int(_env("OPENCE_ACTIVE_SERVER_LIMIT", "0"))
+
 # The configurable HTTP proxy (CHP) is the only public listener. It serves the
 # browser on port 8000 and exposes its control API on 8001; the Hub itself must
 # therefore listen elsewhere or it collides with the proxy API. Keep the Hub on
 # 8081 (the port the backend calls, see OPENCE_JUPYTERHUB_API_URL) and let the
 # proxy own 8000/8001.
-c.JupyterHub.hub_ip = "0.0.0.0"
+c.JupyterHub.hub_ip = _env("OPENCE_HUB_IP", "0.0.0.0")
 c.JupyterHub.hub_port = int(_env("OPENCE_HUB_PORT", "8081"))
 c.ConfigurableHTTPProxy.command = "configurable-http-proxy"
 c.JupyterHub.log_level = "INFO"
@@ -235,7 +250,18 @@ if SPAWNER == "local":
     c.Spawner.default_url = "/lab"
     c.Spawner.http_timeout = int(_env("OPENCE_SPAWN_HTTP_TIMEOUT", "180"))
     c.Spawner.start_timeout = int(_env("OPENCE_SPAWN_START_TIMEOUT", "120"))
-    c.Spawner.notebook_dir = _home
+    # Root each server at the user's own directory. Rooting it at the shared
+    # home tree let every student browse every other student's notebooks.
+    c.Spawner.notebook_dir = os.path.join(_home, "{username}")
+    # One BLAS/OpenMP thread per kernel: the node has a 1-CPU cgroup, and the
+    # libraries otherwise size thread pools from the host's 120 visible cores,
+    # which costs memory and thrashes the single CPU.
+    c.Spawner.environment = {
+        "OMP_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "NUMEXPR_MAX_THREADS": "1",
+    }
 elif SPAWNER == "docker":
     c.JupyterHub.spawner_class = "dockerspawner.DockerSpawner"
     c.DockerSpawner.image = NOTEBOOK_IMAGE

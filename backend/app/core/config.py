@@ -6,6 +6,7 @@ never contain production secrets.
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -83,6 +84,17 @@ class Settings(BaseSettings):
     # what made every notebook write fail authorisation.
     jupyterhub_proxy_url: str = ""
     jupyterhub_public_url: str = "http://localhost:5173"
+    # Multi-Hub sharding. A JSON list; each entry is one independent Hub:
+    #   [{"name": "nb0",
+    #     "api_url":    "http://10.1.75.79:5221/nb/0/hub/api",   # backend -> Hub API
+    #     "proxy_url":  "http://10.1.75.79:5221/nb/0",           # backend -> /user/<name>/
+    #     "public_url": "http://10.1.75.53:5305/nb/0",           # browser (via the edge)
+    #     "api_token":  "<per-shard service token>"}, ...]
+    # A user is pinned to shard sha256(hub_username) % len(shards), so every API
+    # node agrees without shared state. Their notebook home lives on that shard:
+    # changing the number or order of shards moves users to an empty home.
+    # Empty = single Hub configured by the jupyterhub_* settings above.
+    jupyterhub_shards: str = ""
     notebook_backend: Literal["hub", "local", "disabled"] = "hub"
     notebook_start_timeout_seconds: int = 120
     dataset_mount_path: str = "/opt/opencs/datasets"
@@ -188,6 +200,37 @@ class Settings(BaseSettings):
         return (self.jupyterhub_proxy_url or self.jupyterhub_url).rstrip("/")
 
     @property
+    def hub_shards(self) -> list[dict[str, str]]:
+        """Parsed ``OPENCE_JUPYTERHUB_SHARDS``; empty list when unset.
+
+        Raises ``ValueError`` on malformed configuration so a typo fails at
+        startup, not at a student's first notebook launch.
+        """
+        raw = self.jupyterhub_shards.strip()
+        if not raw:
+            return []
+        data = json.loads(raw)
+        if not isinstance(data, list) or not data:
+            raise ValueError("OPENCE_JUPYTERHUB_SHARDS must be a non-empty JSON list")
+        shards: list[dict[str, str]] = []
+        for index, entry in enumerate(data):
+            if not isinstance(entry, dict):
+                raise ValueError(f"OPENCE_JUPYTERHUB_SHARDS[{index}] must be an object")
+            missing = [k for k in ("api_url", "public_url", "api_token") if not entry.get(k)]
+            if missing:
+                raise ValueError(f"OPENCE_JUPYTERHUB_SHARDS[{index}] is missing {missing}")
+            shards.append(
+                {
+                    "name": str(entry.get("name") or f"shard{index}"),
+                    "api_url": str(entry["api_url"]).rstrip("/"),
+                    "proxy_url": str(entry.get("proxy_url") or entry["public_url"]).rstrip("/"),
+                    "public_url": str(entry["public_url"]).rstrip("/"),
+                    "api_token": str(entry["api_token"]),
+                }
+            )
+        return shards
+
+    @property
     def serving_dir(self) -> Path:
         path = Path(self.dataset_serving_dir)
         if not path.is_absolute():
@@ -206,11 +249,16 @@ class Settings(BaseSettings):
                 problems.append("OPENCE_COOKIE_SECURE must be true in production")
             if self.notebook_backend != "hub":
                 problems.append("notebook backend must be 'hub' in production")
-            if not self.jupyterhub_api_token:
+            if not (self.jupyterhub_api_token or self.jupyterhub_shards.strip()):
                 problems.append("OPENCE_JUPYTERHUB_API_TOKEN is required in production")
             if self.auth_mode == "dev":
                 problems.append("dev password authentication cannot be used in production")
-        if self.notebook_backend == "hub" and not self.jupyterhub_api_token:
+        try:
+            shards = self.hub_shards
+        except ValueError as exc:
+            problems.append(str(exc))
+            shards = []
+        if self.notebook_backend == "hub" and not (self.jupyterhub_api_token or shards):
             problems.append("OPENCE_JUPYTERHUB_API_TOKEN is empty; notebook launches will fail")
         if self.is_production and self.grader == "docker":
             problems.append(

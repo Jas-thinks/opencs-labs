@@ -191,7 +191,10 @@ class OpenCSLoginHandler(BaseHandler):
 
     def _target(self) -> str:
         """Honour a safe ``?next=``, otherwise go to the user's own server."""
-        return safe_next_url(self.get_argument("next", None)) or "/hub/home"
+        # hub.base_url carries the shard prefix (e.g. /nb/0/hub/).
+        return safe_next_url(self.get_argument("next", None)) or url_path_join(
+            self.hub.base_url, "home"
+        )
 
     def _to_frontend(self) -> str:
         return login_redirect_url()

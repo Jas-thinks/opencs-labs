@@ -39,3 +39,10 @@ notebook-image/*.tar
 
 # Contains plaintext SSH credentials — never commit
 Systems.md
+
+# Lower-case variant actually used in this repo (Linux is case-sensitive)
+system.md
+
+# Distributed deployment: rendered config, secrets, artifacts, DB dumps
+deploy/distributed/build/
+deploy/distributed/secrets/

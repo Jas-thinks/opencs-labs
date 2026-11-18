@@ -7,6 +7,7 @@ is established by the Hub's OpenCS authenticator.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import threading
 import time
@@ -47,10 +48,14 @@ class HubClient:
         token: str | None = None,
         public_url: str | None = None,
         timeout: float = 20.0,
+        proxy_url: str | None = None,
+        name: str = "default",
     ) -> None:
+        self.name = name
         self.api_url = (api_url or settings.jupyterhub_api_url).rstrip("/")
         self.token = token if token is not None else settings.jupyterhub_api_token
         self.public_url = (public_url or settings.jupyterhub_public_url).rstrip("/")
+        self.proxy_url = (proxy_url or settings.hub_proxy_url).rstrip("/")
         self.timeout = timeout
         self._token_cache: dict[tuple[str, str], tuple[str, float]] = {}
         self._lock = threading.Lock()
@@ -195,7 +200,7 @@ class HubClient:
     def _user_client(self, username: str) -> httpx.Client:
         token = self.user_token(username)
         return httpx.Client(
-            base_url=f"{settings.hub_proxy_url}/user/{username}",
+            base_url=f"{self.proxy_url}/user/{username}",
             headers={"Authorization": f"token {token}"},
             timeout=self.timeout,
         )
@@ -276,6 +281,7 @@ class HubClient:
 
 
 _hub_client: HubClient | None = None
+_hub_shards: list[HubClient] | None = None
 _hub_lock = threading.Lock()
 
 
@@ -285,3 +291,39 @@ def get_hub_client() -> HubClient:
         if _hub_client is None:
             _hub_client = HubClient()
         return _hub_client
+
+
+def get_hub_shards() -> list[HubClient]:
+    """Every configured Hub. One entry (the default client) when not sharded."""
+    global _hub_shards
+    with _hub_lock:
+        if _hub_shards is None:
+            configured = settings.hub_shards
+            _hub_shards = [
+                HubClient(
+                    api_url=shard["api_url"],
+                    token=shard["api_token"],
+                    public_url=shard["public_url"],
+                    proxy_url=shard["proxy_url"],
+                    name=shard["name"],
+                )
+                for shard in configured
+            ]
+    return _hub_shards or [get_hub_client()]
+
+
+def shard_index(username: str, shard_count: int) -> int:
+    """Stable user -> shard mapping, identical on every API node and restart.
+
+    sha256 rather than ``hash()``: Python randomises ``hash`` per process, which
+    would send the same student to a different Hub on every API node.
+    """
+    if shard_count <= 1:
+        return 0
+    digest = hashlib.sha256(username.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") % shard_count
+
+
+def hub_client_for(username: str) -> HubClient:
+    shards = get_hub_shards()
+    return shards[shard_index(username, len(shards))]

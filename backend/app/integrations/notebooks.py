@@ -23,7 +23,12 @@ from urllib.parse import quote
 
 from app.core.config import settings
 from app.core.errors import UpstreamUnavailable
-from app.integrations.jupyterhub import HubClient, ServerState, get_hub_client
+from app.integrations.jupyterhub import (
+    HubClient,
+    ServerState,
+    get_hub_shards,
+    hub_client_for,
+)
 from app.notebooks.ipynb import NOTEBOOK_SUFFIX, validate_file_name
 from app.users.models import User
 
@@ -53,38 +58,58 @@ class NotebookBackend(Protocol):
 
 
 class HubNotebookBackend:
+    """Routes each user to their Hub.
+
+    With ``OPENCE_JUPYTERHUB_SHARDS`` set, a user is pinned to one of several
+    independent Hubs (see ``jupyterhub.shard_index``). Passing ``hub`` pins every
+    user to that one client, which is what the tests and single-Hub deployments do.
+    """
+
     def __init__(self, hub: HubClient | None = None) -> None:
-        self.hub = hub or get_hub_client()
+        self._fixed = hub
+        self.hub = hub or get_hub_shards()[0]
+
+    def _hub(self, user: User) -> HubClient:
+        return self._fixed or hub_client_for(user.hub_username)
 
     def get_server_state(self, user: User) -> ServerState:
-        return self.hub.get_server_state(user.hub_username)
+        return self._hub(user).get_server_state(user.hub_username)
 
     def start_server(self, user: User, options: dict[str, Any] | None = None) -> ServerState:
-        return self.hub.start_server(user.hub_username, options)
+        return self._hub(user).start_server(user.hub_username, options)
 
     def stop_server(self, user: User) -> None:
-        self.hub.stop_server(user.hub_username)
+        self._hub(user).stop_server(user.hub_username)
 
     def open_url(self, user: User, file_name: str | None = None) -> str:
-        return self.hub.open_url(user.hub_username, file_name)
+        return self._hub(user).open_url(user.hub_username, file_name)
 
     def contents_get(self, user: User, path: str) -> dict[str, Any]:
-        return self.hub.contents_get(user.hub_username, path)
+        return self._hub(user).contents_get(user.hub_username, path)
 
     def contents_put(self, user: User, path: str, model: dict[str, Any]) -> dict[str, Any]:
-        return self.hub.contents_put(user.hub_username, path, model)
+        return self._hub(user).contents_put(user.hub_username, path, model)
 
     def contents_list(self, user: User, path: str = "") -> list[dict[str, Any]]:
-        return self.hub.contents_list(user.hub_username, path)
+        return self._hub(user).contents_list(user.hub_username, path)
 
     def contents_delete(self, user: User, path: str) -> None:
-        self.hub.contents_delete(user.hub_username, path)
+        self._hub(user).contents_delete(user.hub_username, path)
 
     def contents_rename(self, user: User, old_path: str, new_path: str) -> None:
-        self.hub.contents_rename(user.hub_username, old_path, new_path)
+        self._hub(user).contents_rename(user.hub_username, old_path, new_path)
 
     def active_session_count(self) -> int:
-        return len(self.hub.list_active_users())
+        hubs = [self._fixed] if self._fixed else get_hub_shards()
+        total = 0
+        for hub in hubs:
+            try:
+                total += len(hub.list_active_users())
+            except UpstreamUnavailable:
+                # One unreachable shard must not block launches on the others;
+                # its users fail on their own requests instead.
+                logger.warning("hub shard %s unreachable while counting sessions", hub.name)
+        return total
 
 
 class DisabledNotebookBackend:
