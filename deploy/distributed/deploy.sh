@@ -157,7 +157,7 @@ build_nb_venv() {  # alias: notebook/Hub runtime + the dataset extension
   local a=$1 sha; sha=$(cat "$ART/SHA")
   r "$a" "set -e; [ -x $ROOT/nb-venv/bin/jupyterhub-singleuser ] && echo 'nb-venv present' && exit 0
           python3 -m venv $ROOT/nb-venv && $ROOT/nb-venv/bin/pip install -q --upgrade pip wheel
-          $ROOT/nb-venv/bin/pip install -q --no-cache-dir -r $ROOT/releases/$sha/notebook-image/requirements.lock jupyterhub-idle-culler==2.0.0
+          $ROOT/nb-venv/bin/pip install -q --no-cache-dir -r $ROOT/releases/$sha/notebook-image/requirements.lock jupyterhub-idle-culler==2.0.0 PyJWT==2.10.1
           $ROOT/nb-venv/bin/python -m ipykernel install --sys-prefix --name python3 --display-name 'Python 3 (OpenCS)'
           echo nb-venv built"
   r "$a" "d=$ROOT/nb-venv/share/jupyter/labextensions/@opencs/jupyterlab-datasets; rm -rf \$d && mkdir -p \$d && tar xzf - -C \$d && echo extension installed" < "$ART/labextension.tgz"
@@ -243,11 +243,22 @@ cmd_start() {
   if [[ "$which" == all ]]; then
     say "hubs + APIs (parallel), then control, then edge"
     each "$(aliases hub) $(aliases api)" _start
+    ensure_cluster_key
     _start ctl
     _start edge
   else
     each "$(aliases "$which")" _start
   fi
+}
+
+# The watchdog on ctl restarts services over SSH with its own key, authorised
+# on every node. Restricting it further (command= in authorized_keys) is
+# possible but would also block the off-host backup copy.
+ensure_cluster_key() {
+  local pub
+  pub=$(r ctl 'k=~/.ssh/opencs_cluster_ed25519; [ -f $k ] || ssh-keygen -q -t ed25519 -N "" -C opencs-watchdog -f $k; cat $k.pub')
+  _auth() { r "$1" "umask 077; mkdir -p ~/.ssh; grep -qxF '$pub' ~/.ssh/authorized_keys 2>/dev/null || echo '$pub' >> ~/.ssh/authorized_keys"; }
+  each "$(aliases all)" _auth
 }
 
 cmd_stop() { ACTION=stop each "$(aliases "${1:?alias|role|all}")" _start; }

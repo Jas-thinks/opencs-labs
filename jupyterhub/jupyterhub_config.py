@@ -155,17 +155,24 @@ IDLE_CULL_EVERY_SECONDS = int(_env("OPENCE_IDLE_CULL_EVERY_SECONDS", "600"))
 # --------------------------------------------------------------------------- #
 # Hub itself
 # --------------------------------------------------------------------------- #
-c.JupyterHub.bind_url = BIND_URL
-
 # Path prefix for a sharded deployment. Each Hub shard is served by the edge
 # under its own prefix (/nb/0/, /nb/1/, ...) on the application's origin, so the
 # OpenCS session cookie reaches /hub/login (single sign-on) and the JupyterLab
 # extension's credentialed calls to /api/v1 are same-origin. Hub and per-user
 # cookies are path-scoped to the prefix, so shards never collide.
+#
+# The prefix is expressed through bind_url only. Setting JupyterHub.base_url as
+# well makes JupyterHub fall back to the deprecated ip/port traits and bind the
+# proxy on the default :8000 instead of the bind_url port.
 HUB_BASE_URL = _env("OPENCE_HUB_BASE_URL", "/")
 if not HUB_BASE_URL.endswith("/"):
     HUB_BASE_URL += "/"
-c.JupyterHub.base_url = HUB_BASE_URL
+if HUB_BASE_URL != "/":
+    from urllib.parse import urlsplit as _urlsplit
+
+    _parts = _urlsplit(BIND_URL)
+    BIND_URL = f"{_parts.scheme}://{_parts.netloc}{HUB_BASE_URL}"
+c.JupyterHub.bind_url = BIND_URL
 
 # Cap on concurrently running user servers on this Hub; 0 = unlimited. Beyond
 # it the Hub answers 429 and the backend reports "capacity exhausted" instead of
