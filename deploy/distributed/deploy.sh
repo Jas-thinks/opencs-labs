@@ -138,9 +138,19 @@ cmd_release() {
 # PyPI, then streamed to its peers over the docker bridge (same absolute path,
 # so console-script shebangs stay valid). SSH agent forwarding carries the
 # operator key for the node-to-node hop; nothing private is stored on nodes.
-copy_dir() {  # src_alias dst_alias path
+with_agent() {  # a private agent holding only the deploy key, for -A hops
+  [[ -n "${OPENCS_AGENT:-}" ]] && return
+  eval "$(ssh-agent -s)" >/dev/null; OPENCS_AGENT=$SSH_AGENT_PID
+  trap 'kill $OPENCS_AGENT 2>/dev/null' EXIT
+  ssh-add -q ~/.ssh/opencs_deploy_ed25519
+}
+
+copy_dir() {  # src_alias dst_alias path   (both nodes on the same physical host)
   local dst_ip; dst_ip=$(ip_of "$2")
-  ssh -A -F "$CFG" "$1" "tar -C $(dirname "$3") -cf - $(basename "$3") | ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes student@$dst_ip 'rm -rf $3.tmp && mkdir -p $3.tmp && tar -C $3.tmp -xf - && rm -rf $3 && mv $3.tmp/$(basename "$3") $3 && rmdir $3.tmp && echo copied $3'"
+  with_agent
+  # ControlPath=none: a multiplexed master opened without -A would silently
+  # drop agent forwarding for this hop.
+  ssh -A -o ControlPath=none -F "$CFG" "$1" "tar -C $(dirname "$3") -cf - $(basename "$3") | ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes student@$dst_ip 'rm -rf $3.tmp && mkdir -p $3.tmp && tar -C $3.tmp -xf - && rm -rf $3 && mv $3.tmp/$(basename "$3") $3 && rmdir $3.tmp && echo copied $3'"
 }
 
 build_nb_venv() {  # alias: notebook/Hub runtime + the dataset extension
@@ -168,7 +178,7 @@ cmd_runtimes() {
   for a in nb1 nb2 nb3; do copy_dir nb0 "$a" $ROOT/npm & done; wait
 
   say "edge + standby edge: nginx package"
-  for a in edge ctl; do rsudo "$a" "command -v nginx >/dev/null || (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nginx-core >/dev/null); command -v nginx; pkill -f 'nginx: master process /usr/sbin/nginx' || true"; done
+  for a in edge ctl; do rsudo "$a" "command -v nginx >/dev/null || (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nginx-core >/dev/null); command -v nginx; pkill -f '[n]ginx: master process /usr/sbin/nginx' || true"; done
 
   say "control node: PostgreSQL client tools for backups / readiness checks"
   rsudo ctl "command -v pg_dump || (apt-get install -y -qq postgresql-client-16 >/dev/null); pg_dump --version"
@@ -197,6 +207,11 @@ DO \\\$\\\$BEGIN
 END\\\$\\\$;
 ALTER ROLE opencs PASSWORD '$dbpw';
 ALTER ROLE replicator PASSWORD '$replpw';
+-- A previous deployment left synchronous_standby_names='db2' in
+-- postgresql.auto.conf: every commit then waits forever for a standby that does
+-- not exist. Replication here is deliberately async.
+ALTER SYSTEM RESET synchronous_standby_names;
+SELECT pg_reload_conf();
 SQL
     if [ '${FRESH_DB:-1}' = 1 ]; then sudo -u postgres dropdb --if-exists opencs; fi
     sudo -u postgres psql -Atqc \"select 1 from pg_database where datname='opencs'\" | grep -q 1 || sudo -u postgres createdb -O opencs opencs

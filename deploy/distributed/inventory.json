@@ -12,10 +12,10 @@
     {"alias": "pg1",   "name": "stu74_sys2", "host": "10.1.75.53", "ssh_port": 2254, "ip": "172.17.0.56", "role": "pg-primary"},
     {"alias": "pg2",   "name": "stu74_sys3", "host": "10.1.75.53", "ssh_port": 2255, "ip": "172.17.0.33", "role": "pg-standby"},
     {"alias": "ctl",   "name": "stu74_sys4", "host": "10.1.75.53", "ssh_port": 2256, "ip": "172.17.0.72", "role": "control", "pypi": false, "public_port": 5256},
-    {"alias": "nb0",   "name": "stu36_sys1", "host": "10.1.75.79", "ssh_port": 2221, "role": "hub", "shard": 0, "public_port": 5221},
-    {"alias": "nb1",   "name": "stu36_sys2", "host": "10.1.75.79", "ssh_port": 2222, "role": "hub", "shard": 1, "public_port": 5222},
-    {"alias": "nb2",   "name": "stu36_sys3", "host": "10.1.75.79", "ssh_port": 2223, "role": "hub", "shard": 2, "public_port": 5223},
-    {"alias": "nb3",   "name": "stu36_sys4", "host": "10.1.75.79", "ssh_port": 2224, "role": "hub", "shard": 3, "public_port": 5224}
+    {"alias": "nb0",   "name": "stu36_sys1", "ip": "172.17.0.22", "host": "10.1.75.79", "ssh_port": 2221, "role": "hub", "shard": 0, "public_port": 5221},
+    {"alias": "nb1",   "name": "stu36_sys2", "ip": "172.17.0.23", "host": "10.1.75.79", "ssh_port": 2222, "role": "hub", "shard": 1, "public_port": 5222},
+    {"alias": "nb2",   "name": "stu36_sys3", "ip": "172.17.0.24", "host": "10.1.75.79", "ssh_port": 2223, "role": "hub", "shard": 2, "public_port": 5223},
+    {"alias": "nb3",   "name": "stu36_sys4", "ip": "172.17.0.25", "host": "10.1.75.79", "ssh_port": 2224, "role": "hub", "shard": 3, "public_port": 5224}
   ],
   "tuning": {
     "api_port": 8000,

@@ -141,7 +141,9 @@ def upsert_datasets(db: Session) -> int:
     manifests = load_manifests(REPO / "datasets" / "manifests")
     count = 0
     for manifest in manifests:
-        problems = verify_file(manifest, REPO / "datasets" / "serving")
+        # Honour OPENCE_DATASET_SERVING_DIR: deployments keep the tree outside
+        # the code checkout (one copy shared by every release).
+        problems = verify_file(manifest, settings.serving_dir)
         if problems:
             raise SystemExit(
                 f"dataset {manifest.slug} failed verification: {'; '.join(problems)}"
