@@ -144,6 +144,13 @@ def upsert_datasets(db: Session) -> int:
         # Honour OPENCE_DATASET_SERVING_DIR: deployments keep the tree outside
         # the code checkout (one copy shared by every release).
         problems = verify_file(manifest, settings.serving_dir)
+        if problems and all("missing file" in p for p in problems):
+            # Not built on this deployment (e.g. its source is unreachable from
+            # the network). Leave it out of the catalogue rather than list a
+            # dataset whose loading cell would fail; integrity failures below
+            # (size/checksum) still abort.
+            log(f"  - dataset {manifest.slug} skipped: {'; '.join(problems)}")
+            continue
         if problems:
             raise SystemExit(
                 f"dataset {manifest.slug} failed verification: {'; '.join(problems)}"
