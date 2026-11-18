@@ -142,6 +142,12 @@ HUB_NAMESPACE = _env("OPENCE_HUB_NAMESPACE", "opencs-hub")
 BIND_URL = _env("OPENCE_HUB_BIND_URL", "http://0.0.0.0:8000")
 HUB_CONNECT_URL = _env("OPENCE_HUB_CONNECT_URL", "")
 HUB_DB_URL = _env("OPENCE_HUB_DB_URL", "sqlite:///jupyterhub.sqlite")
+# Public URL the browser must use for this Hub. When the host publishes a mapped
+# port (for example http://10.1.75.79:5221), set it here so redirects, cookies
+# and generated /user/... links are built from the external address instead of
+# the internal interface the proxy actually binds to.
+PUBLIC_URL = _env("OPENCE_JUPYTERHUB_PUBLIC_URL", "")
+PROXY_PUBLIC_URL = _env("OPENCE_PROXY_PUBLIC_URL", PUBLIC_URL)
 
 IDLE_TIMEOUT_SECONDS = int(_env("OPENCE_IDLE_TIMEOUT_SECONDS", "1800"))
 IDLE_CULL_EVERY_SECONDS = int(_env("OPENCE_IDLE_CULL_EVERY_SECONDS", "600"))
@@ -161,6 +167,36 @@ c.JupyterHub.hub_port = int(_env("OPENCE_HUB_PORT", "8081"))
 c.ConfigurableHTTPProxy.command = "configurable-http-proxy"
 c.JupyterHub.log_level = "INFO"
 c.JupyterHub.db_url = HUB_DB_URL
+
+# External-address handling.
+#
+# The proxy binds on 0.0.0.0:PORT inside the container, but the browser reaches
+# it through a host-mapped port (http://10.1.75.79:5221). Without these two
+# settings JupyterHub builds absolute URLs and redirects from the internal
+# socket, which leaks the container address into the browser.
+#
+# ``public_url`` tells the configurable proxy the address clients actually use,
+# so it rewrites Location headers and generated routes to it.
+if PROXY_PUBLIC_URL:
+    c.ConfigurableHTTPProxy.public_url = PROXY_PUBLIC_URL
+
+# Honour X-Forwarded-Host from a trusted front proxy. Empty means "use the
+# request's own Host header", which is already the mapped external host when the
+# browser talks to 10.1.75.79:5221 directly.
+_forwarded_host = _env("OPENCE_FORWARDED_HOST_HEADER", "")
+if _forwarded_host:
+    c.JupyterHub.forwarded_host_header = _forwarded_host
+
+# Cross-origin note (no extra trait needed in JupyterHub 4):
+# the SPA at http://10.1.75.53:6306 and the notebook at
+# http://10.1.75.79:5221 are different origins. Opening a notebook is a
+# top-level navigation to the notebook origin, so the Hub cookie is set and
+# sent for that host directly; the SPA never needs to make credentialed
+# cross-origin XHR calls to the notebook. JupyterHub 4 removed the 3.x
+# `allow_origin` trait, and `trust_xheaders` is likewise absent, so setting
+# either would fail at startup. The mapped public URL above is what makes the
+# generated links external.
+SPA_ORIGIN = _env("OPENCE_PUBLIC_ORIGIN", "").rstrip("/")
 
 # The only way in is the OpenCS session JWT (see opencs_auth.py). There is no
 # password form and no local user database of passwords, so a student who is
