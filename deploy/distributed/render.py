@@ -29,6 +29,8 @@ HERE = Path(__file__).resolve().parent
 BUILD = HERE / "build"
 SECRETS = HERE / "secrets" / "cluster.env"
 HOME = "/home/student"
+sys.path.insert(0, str(HERE / "monitoring"))
+import config as monitoring  # noqa: E402  (deploy/distributed/monitoring/config.py)
 ROOT = f"{HOME}/opencs"
 KEY = Path.home() / ".ssh" / "opencs_deploy_ed25519"
 
@@ -47,6 +49,11 @@ def load_or_create_secrets(shards: int) -> dict[str, str]:
         "JWT_SECRET": lambda: secrets.token_hex(32),
         "DB_PASSWORD": lambda: secrets.token_hex(24),
         "REPL_PASSWORD": lambda: secrets.token_hex(24),
+        # Observability (ADR-011)
+        "AGENT_TOKEN": lambda: secrets.token_hex(32),
+        "PG_MONITOR_PASSWORD": lambda: secrets.token_hex(24),
+        "GRAFANA_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(18),
+        "GRAFANA_SECRET_KEY": lambda: secrets.token_hex(24),
     }
     for i in range(shards):
         wanted[f"HUB_TOKEN_{i}"] = lambda: secrets.token_hex(32)
@@ -288,6 +295,11 @@ http {{
 
 {chr(10).join(shard_upstreams)}
 
+    upstream grafana {{
+        server {monitoring.monitoring_node(inv)['ip']}:3000;  # monitoring node
+        keepalive 4;
+    }}
+
     server {{
         listen {listen} default_server reuseport;
         server_name _;
@@ -320,6 +332,12 @@ http {{
         location = /ready  {{ proxy_pass http://opencs_api; access_log off; }}
 
 {chr(10).join(shard_locations)}
+
+        # Grafana (monitoring node). Login required; served from a sub-path.
+        location /grafana/ {{
+            proxy_pass http://grafana;
+            include {ROOT}/env/nb-proxy.inc;
+        }}
 
         location /assets/ {{
             expires 1y;
@@ -416,6 +434,8 @@ def pg_hba(inv: dict) -> str:
         lines.append(f"host replication replicator {n['ip']}/32 scram-sha-256  # {n['name']}\n")
     for n in by_role(inv["nodes"], "control"):
         lines.append(f"host replication replicator {n['ip']}/32 scram-sha-256  # backups\n")
+    # Local node agent (read-only pg_monitor role).
+    lines.append("host opencs opencs_monitor 127.0.0.1/32 scram-sha-256  # node agent\n")
     return "".join(lines)
 
 
@@ -458,6 +478,10 @@ def watchdog_targets(inv: dict) -> str:
             lines.append(f"{n['alias']}|http|{url}|{ssh_host}|{ssh_port}|hub\n")
         elif role in ("pg-primary", "pg-standby"):
             lines.append(f"{n['alias']}|pg|{ip}|{ssh_host}|{ssh_port}|postgres\n")
+    mon = monitoring.monitoring_node(inv)
+    ssh_host, ssh_port = (mon["ip"], 22) if mon["host"] == "10.1.75.53" else (mon["host"], mon["ssh_port"])
+    lines.append(f"{mon['alias']}|http|http://{mon['ip']}:8428/health|{ssh_host}|{ssh_port}|vm\n")
+    lines.append(f"{mon['alias']}|http|http://{mon['ip']}:3000/api/health|{ssh_host}|{ssh_port}|grafana\n")
     return "".join(lines)
 
 
@@ -468,9 +492,36 @@ def main() -> int:
     BUILD.mkdir(exist_ok=True)
     write(BUILD / "ssh_config", ssh_config(inv))
 
+    mon = monitoring.monitoring_node(inv)
     for n in inv["nodes"]:
         d = BUILD / n["alias"]
         role = n["role"]
+        agent = {
+            "AGENT_NODE": n["name"],
+            "AGENT_ROLE": role,
+            "AGENT_PORT": monitoring.agent_port(n),
+            "AGENT_TOKEN": sec["AGENT_TOKEN"],
+            "OPENCE_RUNTIME_DIR": ROOT,
+        }
+        if role in ("pg-primary", "pg-standby"):
+            agent["PG_MONITOR_PASSWORD"] = sec["PG_MONITOR_PASSWORD"]
+        if role == "hub":
+            agent["HUB_HEALTH_URL"] = f"http://127.0.0.1:5000/nb/{n['shard']}/hub/health"
+            agent["HUB_SERVER_LIMIT"] = inv["tuning"]["hub_active_server_limit"]
+        write(d / "agent.env", env_file(agent))
+        if n["alias"] == mon["alias"]:
+            write(d / "monitoring.env", env_file({
+                "MON_IP": n["ip"],
+                "VM_RETENTION": inv["tuning"]["metrics_retention"],
+            }))
+            write(d / "scrape.yml", monitoring.scrape_config(inv, sec["AGENT_TOKEN"]))
+            write(d / "alerts.yml", monitoring.alert_rules(inv))
+            write(d / "grafana.ini", monitoring.grafana_ini(
+                inv, sec["GRAFANA_ADMIN_PASSWORD"], sec["GRAFANA_SECRET_KEY"], ROOT))
+            write(d / "grafana-provisioning" / "datasources" / "vm.yaml", monitoring.grafana_datasource(inv))
+            write(d / "grafana-provisioning" / "dashboards" / "opencs.yaml", monitoring.grafana_dashboard_provider(ROOT))
+            for name, body in monitoring.dashboards().items():
+                write(d / "dashboards" / name, body)
         if role == "api":
             write(d / "api.env", env_file(app_env(inv, sec, n, worker=False)))
         elif role == "control":
@@ -502,6 +553,7 @@ def main() -> int:
             write(d / "pg.env", env_file({
                 "DB_PASSWORD": sec["DB_PASSWORD"],
                 "REPL_PASSWORD": sec["REPL_PASSWORD"],
+                "PG_MONITOR_PASSWORD": sec["PG_MONITOR_PASSWORD"],
                 "PRIMARY_IP": by_role(inv["nodes"], "pg-primary")[0]["ip"],
             }))
     print(f"rendered {len(inv['nodes'])} nodes into {BUILD.relative_to(HERE.parent.parent)}")

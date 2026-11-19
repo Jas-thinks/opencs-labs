@@ -16,6 +16,8 @@
 #   verify                 end-to-end checks + latency sample through the edge
 #   rollout                zero-downtime code update: release + rolling API restart
 #   rollback               repoint `current` to the previous release everywhere
+#   monitoring             VictoriaMetrics + vmalert + Grafana + node agents (ADR-011)
+#   logs [who] [svc] [re]  tail or grep service logs across the cluster
 #
 # Needs: ~/.ssh/opencs_deploy_ed25519 (authorised on all nodes),
 #        secrets/sudo.env with lines `<alias>=<sudo password>` (gitignored).
@@ -116,7 +118,8 @@ ship() {  # alias: code + scripts + env + role artifacts, then flip `current`
   r "$a" "cd $ROOT/releases && [ -d $sha ] || tar xzf -" < "$ART/code.tgz"
   r "$a" "cat > $ROOT/bin/opencs.sh && chmod +x $ROOT/bin/opencs.sh" < "$HERE/node/opencs.sh"
   r "$a" "cat > $ROOT/bin/watchdog.sh" < "$HERE/node/watchdog.sh"
-  for f in "$BUILD/$a"/*; do [[ -e "$f" ]] && r "$a" "umask 077; cat > $ROOT/env/$(basename "$f")" < "$f"; done
+  r "$a" "umask 077; tar -C $ROOT/env -xf -" < <(tar -C "$BUILD/$a" -cf - .)
+  r "$a" "cat > $ROOT/bin/agent.py" < "$HERE/node/agent.py"
   case "$role" in
     edge|control) r "$a" "rm -rf $ROOT/frontend.new && mkdir $ROOT/frontend.new && tar xzf - -C $ROOT/frontend.new && rm -rf $ROOT/frontend.old && { [ -d $ROOT/frontend ] && mv $ROOT/frontend $ROOT/frontend.old || true; } && mv $ROOT/frontend.new $ROOT/frontend" < "$ART/frontend.tgz" ;;
   esac
@@ -233,8 +236,16 @@ cmd_migrate() {
 }
 
 # --------------------------------------------------------------------------- #
-svc_for() { case "$(q "print(next(n['role'] for n in inv['nodes'] if n['alias']=='$1'))")" in
-  api) echo api;; hub) echo hub;; edge) echo edge;; control) echo "worker edge watchdog";; *) echo "";; esac; }
+MON=$(python3 -c "import json;print(json.load(open('$INV'))['tuning'].get('monitoring_alias','pg2'))")
+svc_for() {
+  local base
+  case "$(q "print(next(n['role'] for n in inv['nodes'] if n['alias']=='$1'))")" in
+    api) base=api;; hub) base=hub;; edge) base=edge;; control) base="worker edge watchdog";; *) base="";;
+  esac
+  # Every node runs the metrics agent; the monitoring node also runs the stack.
+  if [[ "$1" == "$MON" ]]; then base="$base vm vmalert grafana"; fi
+  echo "$base agent"
+}
 
 _start() { local s; for s in $(svc_for "$1"); do r "$1" "bash $ROOT/bin/opencs.sh ${ACTION:-start} $s"; done; }
 
@@ -305,8 +316,73 @@ cmd_rollback() {
   ACTION=restart cmd_start all
 }
 
+# --------------------------------------------------------------------------- #
+# Observability (ADR-011): VictoriaMetrics + vmalert + Grafana on the monitoring
+# node, an agent on every node. Binaries are fetched and checksum-verified on
+# the operator machine (the nodes cannot reach dl.grafana.com).
+VM_VERSION=v1.102.1
+GRAFANA_VERSION=11.2.0
+GRAFANA_SHA256=a7e717b78c11e37b147994fc04655da5f434280e1f01ceb84e8f38ca7fdef050
+
+fetch_monitoring_binaries() {
+  local dir="$BUILD/monitoring-bin"; mkdir -p "$dir"
+  local base="https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/$VM_VERSION"
+  for pkg in victoria-metrics vmutils; do
+    local f="$pkg-linux-amd64-$VM_VERSION.tar.gz"
+    [[ -f "$dir/$f" ]] || curl -fsSL --retry 3 -o "$dir/$f" "$base/$f"
+    curl -fsSL --retry 3 "$base/${pkg}-linux-amd64-${VM_VERSION}_checksums.txt" | grep " $f\$" | (cd "$dir" && sha256sum -c -) >/dev/null \
+      || die "checksum mismatch for $f"
+  done
+  local g="grafana-$GRAFANA_VERSION.linux-amd64.tar.gz"
+  [[ -f "$dir/$g" ]] || curl -fsSL --retry 3 -o "$dir/$g" "https://dl.grafana.com/oss/release/$g"
+  echo "$GRAFANA_SHA256  $g" | (cd "$dir" && sha256sum -c -) >/dev/null || die "checksum mismatch for $g"
+  echo "$dir"
+}
+
+cmd_monitoring() {
+  local dir; dir=$(fetch_monitoring_binaries)
+  say "monitoring stack on $MON"
+  r "$MON" "mkdir -p $ROOT/monitoring $ROOT/data/vm $ROOT/data/grafana $ROOT/logs/grafana"
+  r "$MON" "cd $ROOT/monitoring && [ -x victoria-metrics-prod ] || tar xzf - victoria-metrics-prod" < "$dir/victoria-metrics-linux-amd64-$VM_VERSION.tar.gz"
+  r "$MON" "cd $ROOT/monitoring && [ -x vmalert-prod ] || tar xzf - vmalert-prod" < "$dir/vmutils-linux-amd64-$VM_VERSION.tar.gz"
+  r "$MON" "cd $ROOT/monitoring && [ -x grafana/bin/grafana ] || { tar xzf - && rm -rf grafana && mv grafana-v$GRAFANA_VERSION grafana; }" < "$dir/grafana-$GRAFANA_VERSION.linux-amd64.tar.gz"
+  r "$MON" "ls $ROOT/monitoring; $ROOT/monitoring/victoria-metrics-prod -version"
+
+  say "read-only PostgreSQL role for the node agents"
+  local monpw; monpw=$(grep ^PG_MONITOR_PASSWORD= "$HERE/secrets/cluster.env" | cut -d= -f2)
+  rsudo pg1 "sudo -u postgres psql -v ON_ERROR_STOP=1 -q <<SQL
+DO \\\$\\\$BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='opencs_monitor') THEN CREATE ROLE opencs_monitor LOGIN; END IF;
+END\\\$\\\$;
+ALTER ROLE opencs_monitor PASSWORD '$monpw';
+GRANT pg_monitor TO opencs_monitor;
+GRANT CONNECT ON DATABASE opencs TO opencs_monitor;
+SQL
+sudo -u postgres psql -q -d opencs -c 'GRANT SELECT ON jobs, notifications TO opencs_monitor'"
+  for a in pg1 pg2; do
+    r "$a" "cat > /tmp/pg_hba.opencs" < "$BUILD/$a/pg_hba.opencs"
+    rsudo "$a" "h=/etc/postgresql/16/main/pg_hba.conf; sed -i '/# BEGIN opencs/,/# END opencs/d' \$h
+      { echo '# BEGIN opencs'; cat /tmp/pg_hba.opencs; echo '# END opencs'; } >> \$h; rm -f /tmp/pg_hba.opencs
+      sudo -u postgres psql -qc 'select pg_reload_conf()' >/dev/null && echo hba reloaded"
+  done
+
+  say "agents everywhere, monitoring services, edge reload"
+  each "$(aliases all)" _start
+  for a in edge ctl; do r "$a" "nginx -p $ROOT -c $ROOT/env/edge.conf -t -q && kill -HUP \$(cat $ROOT/run/edge.nginx.pid) && echo reloaded"; done
+}
+
+# Search logs across the cluster:  deploy.sh logs <alias|role|all> [service] [grep-pattern]
+cmd_logs() {
+  local which=${1:-all} svc=${2:-} pattern=${3:-}
+  _log() {
+    r "$1" "cd $ROOT/logs 2>/dev/null || exit 0; files=\$(ls ${svc:+$svc.log} ${svc:-*.log} 2>/dev/null); [ -n \"\$files\" ] || exit 0
+            if [ -n '$pattern' ]; then grep -H -E '$pattern' \$files | tail -n ${LINES_N:-40}; else tail -n ${LINES_N:-20} \$files; fi"
+  }
+  each "$(aliases "$which")" _log
+}
+
 cmd="${1:-}"; shift || true
 case "$cmd" in
-  render|preflight|cleanup|release|runtimes|postgres|migrate|start|stop|status|verify|rollout|rollback) "cmd_$cmd" "$@" ;;
+  render|preflight|cleanup|release|runtimes|postgres|migrate|start|stop|status|verify|rollout|rollback|monitoring|logs) "cmd_$cmd" "$@" ;;
   *) sed -n '2,25p' "$0"; exit 64 ;;
 esac

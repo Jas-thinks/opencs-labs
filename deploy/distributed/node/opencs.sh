@@ -10,7 +10,7 @@
 #   opencs.sh list                  # status of every service started here
 #   opencs.sh rotate                # copy-truncate logs larger than 20 MiB
 #
-# Services: api | worker | hub | edge | watchdog
+# Services: api | worker | hub | edge | watchdog | agent | vm | vmalert | grafana
 #
 # Layout (~/opencs):
 #   current -> releases/<sha>   code
@@ -56,6 +56,35 @@ EOF
       ;;
     watchdog)
       echo "exec bash '$ROOT/bin/watchdog.sh'"
+      ;;
+    agent)
+      # Node metrics exporter (stdlib only), every node. ADR-011.
+      echo "set -a && . '$ROOT/env/agent.env' && set +a && exec python3 '$ROOT/bin/agent.py'"
+      ;;
+    vm)
+      # VictoriaMetrics: scrapes every agent/API and stores 30 days of metrics.
+      # memory.allowedBytes caps its caches inside the 512 MiB cgroup.
+      cat <<EOF
+set -a && . "$ROOT/env/monitoring.env" && set +a && \
+exec "$ROOT/monitoring/victoria-metrics-prod" \
+  -storageDataPath="$ROOT/data/vm" -retentionPeriod="\$VM_RETENTION" \
+  -httpListenAddr="\$MON_IP:8428" -promscrape.config="$ROOT/env/scrape.yml" \
+  -memory.allowedBytes=64MiB -search.maxConcurrentRequests=4 -loggerLevel=WARN
+EOF
+      ;;
+    vmalert)
+      # Alert rules; firing state is written back as ALERTS series (UI only,
+      # no notifier) and shown in Grafana.
+      cat <<EOF
+set -a && . "$ROOT/env/monitoring.env" && set +a && \
+exec "$ROOT/monitoring/vmalert-prod" -rule="$ROOT/env/alerts.yml" \
+  -datasource.url="http://\$MON_IP:8428" -remoteWrite.url="http://\$MON_IP:8428" \
+  -remoteRead.url="http://\$MON_IP:8428" -notifier.blackhole \
+  -httpListenAddr=127.0.0.1:8880 -evaluationInterval=30s -loggerLevel=WARN
+EOF
+      ;;
+    grafana)
+      echo "exec '$ROOT/monitoring/grafana/bin/grafana' server --homepath '$ROOT/monitoring/grafana' --config '$ROOT/env/grafana.ini'"
       ;;
     *) return 1 ;;
   esac
@@ -144,5 +173,5 @@ case "${1:-}" in
   list)      rc=0; for f in "$RUN"/*.pid; do
                n=$(basename "$f" .pid); [[ -e "$f" && "$n" != *.* ]] || continue  # skip *.app.pid, edge.nginx.pid
                cmd_status "$n" || rc=1; done; exit $rc ;;
-  *) echo "usage: $0 {start|stop|restart|status} <api|worker|hub|edge|watchdog> | list | rotate" >&2; exit 64 ;;
+  *) echo "usage: $0 {start|stop|restart|status} <api|worker|hub|edge|watchdog|agent|vm|vmalert|grafana> | list | rotate" >&2; exit 64 ;;
 esac
