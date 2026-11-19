@@ -7,6 +7,7 @@ import { Prose } from "../../components/Blocks";
 import { Badge, ErrorBox, Loading } from "../../components/ui";
 import { errorMessage, formatDateTime } from "../../components/kit";
 import { useCourse } from "./CourseShell";
+import { readIpynb } from "../../components/ipynbFile";
 import { visibilityBadge } from "./ClassworkTab";
 
 export function AssignmentDetail() {
@@ -170,6 +171,32 @@ function StudentView({ assignment, onChanged }: { assignment: AssignmentOut; onC
           <button className="btn btn-primary" type="button" onClick={turnIn} disabled={busy || !notebookId || closed}>
             {mine ? "Turn in again" : "Turn in"}
           </button>
+          <div className="upload-divider small dim">or upload a .ipynb from your computer</div>
+          <input
+            className="input"
+            type="file"
+            accept=".ipynb,application/x-ipynb+json"
+            disabled={busy || closed}
+            aria-label="Upload a .ipynb notebook to turn in"
+            onChange={async (event) => {
+              const file = event.target.files?.[0];
+              if (!file) return;
+              setBusy(true);
+              setError(null);
+              setMessage(null);
+              try {
+                const { file_name, notebook } = await readIpynb(file);
+                const submission = await api.submitUpload(assignment.id, file_name, notebook);
+                setMessage(`Turned in ${file_name} (attempt ${submission.attempt_number}${submission.is_late ? ", late" : ""}).`);
+                onChanged();
+              } catch (cause) {
+                setError(errorMessage(cause));
+              } finally {
+                setBusy(false);
+                event.target.value = "";
+              }
+            }}
+          />
           {closed && <span className="small dim">The due date has passed and late work is not accepted.</span>}
           {mine && !closed && <span className="small dim">You can turn in again until the due date; your teacher grades the latest attempt.</span>}
           {message && <div className="notice notice-success">{message}</div>}

@@ -7,6 +7,7 @@ query time; notification fan-out runs in the job worker, never in the request.
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any
 from urllib.parse import urlsplit
@@ -58,6 +59,20 @@ class StreamService:
         from app.practice.models import Exercise
 
         target = item.target.strip()
+        if item.kind == "notebook":
+            from app.notebooks.models import NotebookBlob
+            from app.notebooks.uploads import clean_label
+
+            blob = self.db.get(NotebookBlob, target.lower()) if re.fullmatch(r"[0-9a-fA-F]{64}", target) else None
+            if blob is None:
+                raise NotFound("uploaded notebook", target[:16])
+            return CoursePostAttachment(
+                kind="notebook",
+                blob_sha256=blob.sha256,
+                size_bytes=blob.size_bytes,
+                label=clean_label(item.label or "notebook.ipynb"),
+                position=position,
+            )
         if item.kind == "file":
             raise ApiError(
                 "ATTACHMENT_UNSUPPORTED",
@@ -134,7 +149,9 @@ class StreamService:
                     "kind": a.kind,
                     "label": a.label,
                     "url": a.url,
-                    "internal": a.kind != "link",
+                    "internal": a.kind not in ("link", "notebook"),
+                    "blob_sha256": a.blob_sha256,
+                    "size_bytes": a.size_bytes,
                 }
                 for a in post.attachments
             ],
@@ -325,6 +342,70 @@ class StreamService:
             raise Forbidden("Only course staff can change posts")
         if post.author_id != user.id and role not in MODERATORS:
             raise Forbidden("Only the author or an instructor can change this post")
+
+    # -- notebook attachments (.ipynb only) -------------------------------
+    def upload_notebook(self, user: User, course_id: str, upload) -> dict:
+        """Store a validated .ipynb once; posts then reference it by sha256."""
+        from app.notebooks.snapshots import get_snapshot_store
+        from app.notebooks.uploads import validate_upload
+
+        course = get_course(self.db, course_id)
+        require_course_staff(self.db, user, course.id)
+        if course.status == "archived":
+            raise Conflict("COURSE_ARCHIVED", "This class is archived and read-only")
+        document, file_name, size = validate_upload(upload)
+        ref = get_snapshot_store(self.db).put(document)
+        self.db.commit()
+        return {
+            "sha256": ref.sha256,
+            "file_name": file_name,
+            "size_bytes": size,
+            "cells": len(document.get("cells", [])),
+        }
+
+    def _notebook_attachment(self, user: User, post_id: str, attachment_id: str):
+        post, role = self._load(user, post_id)
+        attachment = self.db.get(CoursePostAttachment, _uuid(attachment_id, "attachment"))
+        if attachment is None or attachment.post_id != post.id or attachment.kind != "notebook":
+            raise NotFound("attachment")
+        return post, attachment, role
+
+    def notebook_document(self, user: User, post_id: str, attachment_id: str) -> tuple[str, str, dict]:
+        from app.notebooks.snapshots import get_snapshot_store
+
+        _, attachment, _ = self._notebook_attachment(user, post_id, attachment_id)
+        document = get_snapshot_store(self.db).get(attachment.blob_sha256)
+        return attachment.label, attachment.blob_sha256, document
+
+    def copy_notebook(self, user: User, post_id: str, attachment_id: str, notebook_service) -> dict:
+        """Give the viewer their own editable copy in their notebook workspace."""
+        from app.notebooks.models import Notebook
+        from app.notebooks.snapshots import get_snapshot_store
+
+        _, attachment, _ = self._notebook_attachment(user, post_id, attachment_id)
+        source_ref = f"attachment:{attachment.id}"
+        existing = self.db.scalar(
+            select(Notebook)
+            .where(Notebook.user_id == user.id, Notebook.source_ref == source_ref)
+            .order_by(Notebook.created_at.desc())
+            .limit(1)
+        )
+        created = False
+        if existing is None:
+            document = dict(get_snapshot_store(self.db).get(attachment.blob_sha256))
+            metadata = dict(document.get("metadata") or {})
+            metadata.pop("opencs", None)  # never inherit another notebook's identity
+            document["metadata"] = metadata
+            existing = notebook_service.create(
+                user,
+                title=attachment.label[:-6] if attachment.label.endswith(".ipynb") else attachment.label,
+                kind="material",
+                source_ref=source_ref,
+                notebook=document,
+            )
+            created = True
+        notebook, url = notebook_service.open(user, str(existing.id))
+        return {"notebook_id": notebook.id, "title": notebook.title, "url": url, "created": created}
 
     # -- read receipts ---------------------------------------------------
     def mark_read(self, user: User, post_id: str) -> None:

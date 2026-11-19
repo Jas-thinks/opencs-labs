@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { api } from "../../api/client";
-import type { AttachmentInput, AttachmentKind, PostInput, PostOut, ReadersResponse } from "../../api/types";
+import type { AttachmentInput, AttachmentKind, AttachmentOut, PostInput, PostOut, ReadersResponse } from "../../api/types";
 import { useAsync } from "../../app/useAsync";
 import { Prose } from "../../components/Blocks";
 import { Badge, Empty, ErrorBox, Loading } from "../../components/ui";
@@ -16,6 +16,7 @@ import {
   toLocalInput,
 } from "../../components/kit";
 import { useCourse } from "./CourseShell";
+import { formatKb, readIpynb } from "../../components/ipynbFile";
 
 /** The class stream (one-way: ADR-010). Staff post; everyone reads. */
 export function StreamTab({ kind }: { kind?: "material" }) {
@@ -132,7 +133,9 @@ function PostCard({ post, onChanged }: { post: PostOut; onChanged: () => void })
       {post.attachments.length > 0 && (
         <div className="attachments">
           {post.attachments.map((a) =>
-            a.internal && a.url ? (
+            a.kind === "notebook" ? (
+              <NotebookAttachment key={a.id} postId={post.id} attachment={a} />
+            ) : a.internal && a.url ? (
               <Link key={a.id} to={a.url} className="attachment">
                 <span className="attachment-kind">{a.kind}</span>
                 <span>{a.label}</span>
@@ -205,7 +208,49 @@ function PostCard({ post, onChanged }: { post: PostOut; onChanged: () => void })
   );
 }
 
+function NotebookAttachment({ postId, attachment }: { postId: string; attachment: AttachmentOut }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="attachment attachment-notebook">
+      <span className="attachment-kind">notebook · {formatKb(attachment.size_bytes)}</span>
+      <span>{attachment.label}</span>
+      <span className="row" style={{ gap: 6, marginTop: 6 }}>
+        <button
+          className="btn btn-sm btn-primary"
+          type="button"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            setError(null);
+            const tab = window.open("about:blank", "_blank"); // inside the click: not popup-blocked
+            try {
+              const copy = await api.copyAttachment(postId, attachment.id);
+              if (tab) {
+                tab.opener = null;
+                tab.location.href = copy.url;
+              }
+            } catch (cause) {
+              tab?.close();
+              setError(errorMessage(cause));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? "Copying…" : "Copy to my notebooks"}
+        </button>
+        <a className="btn btn-sm btn-ghost" href={api.attachmentNotebookUrl(postId, attachment.id)}>
+          Download
+        </a>
+      </span>
+      {error && <span className="small" style={{ color: "var(--red)" }}>{error}</span>}
+    </div>
+  );
+}
+
 const ATTACHMENT_LABELS: Record<AttachmentKind, string> = {
+  notebook: "Notebook (.ipynb)",
   link: "Web link",
   dataset: "Dataset",
   lesson: "Lesson",
@@ -237,7 +282,7 @@ function Composer({
     existing?.attachments.map((a) => ({
       kind: a.kind as AttachmentKind,
       // Internal refs are re-sent by target: slug from the route, or the URL for links.
-      target: a.kind === "link" ? a.url ?? "" : (a.url ?? "").split("/").pop() ?? "",
+      target: a.kind === "notebook" ? a.blob_sha256 ?? "" : a.kind === "link" ? a.url ?? "" : (a.url ?? "").split("/").pop() ?? "",
       label: a.label,
     })) ?? [],
   );
@@ -372,7 +417,18 @@ function AttachmentEditor({
               </option>
             ))}
           </select>
-          {item.kind === "dataset" ? (
+          {item.kind === "notebook" ? (
+            item.target ? (
+              <span className="row small" style={{ flex: 1, gap: 6 }}>
+                <Badge tone="green">uploaded</Badge> {item.label}
+              </span>
+            ) : (
+              <NotebookPicker
+                courseId={courseId}
+                onUploaded={(sha, label) => update(index, { target: sha, label })}
+              />
+            )
+          ) : item.kind === "dataset" ? (
             <select className="select" style={{ flex: 1 }} value={item.target} onChange={(e) => update(index, { target: e.target.value })}>
               <option value="">Choose a dataset…</option>
               {(datasets.data?.datasets ?? []).map((d) => (
@@ -405,10 +461,49 @@ function AttachmentEditor({
         </div>
       ))}
       {value.length < 10 && (
-        <button className="btn btn-ghost btn-sm" style={{ alignSelf: "flex-start" }} type="button" onClick={() => onChange([...value, { kind: "link", target: "" }])}>
-          + Attach link or resource
-        </button>
+        <span className="row" style={{ gap: 6 }}>
+          <button className="btn btn-ghost btn-sm" type="button" onClick={() => onChange([...value, { kind: "notebook", target: "" }])}>
+            + Attach .ipynb notebook
+          </button>
+          <button className="btn btn-ghost btn-sm" type="button" onClick={() => onChange([...value, { kind: "link", target: "" }])}>
+            + Attach link or resource
+          </button>
+        </span>
       )}
     </div>
+  );
+}
+
+function NotebookPicker({ courseId, onUploaded }: { courseId: string; onUploaded: (sha: string, label: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <span className="stack-sm" style={{ flex: 1 }}>
+      <input
+        className="input"
+        type="file"
+        accept=".ipynb,application/x-ipynb+json"
+        disabled={busy}
+        aria-label="Choose a .ipynb notebook"
+        onChange={async (event) => {
+          const file = event.target.files?.[0];
+          if (!file) return;
+          setBusy(true);
+          setError(null);
+          try {
+            const { file_name, notebook } = await readIpynb(file);
+            const uploaded = await api.uploadNotebook(courseId, file_name, notebook);
+            onUploaded(uploaded.sha256, uploaded.file_name);
+          } catch (cause) {
+            setError(errorMessage(cause));
+            event.target.value = "";
+          } finally {
+            setBusy(false);
+          }
+        }}
+      />
+      {busy && <span className="small dim">Uploading…</span>}
+      {error && <span className="small" style={{ color: "var(--red)" }}>{error}</span>}
+    </span>
   );
 }

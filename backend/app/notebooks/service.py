@@ -97,6 +97,9 @@ class NotebookService:
         if notebook.user_id != user.id:
             # Do not reveal that another user's notebook exists.
             raise NotFound("notebook")
+        if notebook.kind == "upload":
+            # Storage-only turn-in (no workspace file): never opened or edited.
+            raise NotFound("notebook")
         return notebook
 
     def _existing_file_names(self, user: User) -> set[str]:
@@ -178,7 +181,8 @@ class NotebookService:
         return list(
             self.db.scalars(
                 select(Notebook)
-                .where(Notebook.user_id == user.id)
+                # Uploaded turn-ins are storage-only (no workspace file).
+                .where(Notebook.user_id == user.id, Notebook.kind != "upload")
                 .order_by(Notebook.updated_at.desc())
             )
         )

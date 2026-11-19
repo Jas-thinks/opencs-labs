@@ -550,7 +550,8 @@ class GradingService:
         return self.get_rubric(user, str(assignment.id))
 
     # -- submissions -----------------------------------------------------
-    def submit(self, user: User, assignment_id: str, notebook_id: uuid.UUID) -> dict:
+    def _submission_context(self, user: User, assignment_id: str):
+        """Shared checks for every way of turning work in."""
         assignment = self.get_assignment_row(assignment_id)
         if not is_visible_to_students(assignment):
             raise NotFound("assignment")
@@ -559,9 +560,6 @@ class GradingService:
             raise NotFound("assignment")
         if role != "student":
             raise Forbidden("Only enrolled students can submit work")
-
-        notebook = self.notebook_service.get_owned(user, notebook_id)
-
         attempt_number = int(
             self.db.scalar(
                 select(func.max(Submission.attempt_number)).where(
@@ -571,7 +569,6 @@ class GradingService:
             )
             or 0
         ) + 1
-
         now = now_utc()
         due_at = ensure_utc(assignment.due_at)
         is_late = bool(due_at is not None and now > due_at)
@@ -581,14 +578,9 @@ class GradingService:
                 "The due date has passed and late submissions are not accepted",
                 details={"due_at": assignment.due_at.isoformat() if assignment.due_at else None},
             )
+        return assignment, attempt_number, now, is_late
 
-        version, _ = self.notebook_service.snapshot_working_copy(
-            user,
-            notebook,
-            kind="submission",
-            actor_id=user.id,
-            commit=False,
-        )
+    def _record_submission(self, user, assignment, notebook, version, attempt_number, now, is_late) -> dict:
         submission = Submission(
             assignment_id=assignment.id,
             user_id=user.id,
@@ -604,6 +596,47 @@ class GradingService:
         self.db.commit()
         self.db.refresh(submission)
         return self._submission_out(submission, student=user, version=version, for_owner=True)
+
+    def submit(self, user: User, assignment_id: str, notebook_id: uuid.UUID) -> dict:
+        assignment, attempt_number, now, is_late = self._submission_context(user, assignment_id)
+        notebook = self.notebook_service.get_owned(user, notebook_id)
+        version, _ = self.notebook_service.snapshot_working_copy(
+            user,
+            notebook,
+            kind="submission",
+            actor_id=user.id,
+            commit=False,
+        )
+        return self._record_submission(user, assignment, notebook, version, attempt_number, now, is_late)
+
+    def submit_upload(self, user: User, assignment_id: str, upload) -> dict:
+        """Turn in an .ipynb uploaded from the student's computer.
+
+        No notebook server is needed: the document is validated and stored as
+        an immutable submission version on a storage-only notebook row (kind
+        'upload', hidden from the workspace list), so it grades exactly like
+        any other submission.
+        """
+        from app.core.config import settings as app_settings
+        from app.notebooks.uploads import validate_upload
+
+        assignment, attempt_number, now, is_late = self._submission_context(user, assignment_id)
+        document, file_name, _ = validate_upload(upload)
+        notebook = Notebook(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            title=file_name[:-6][:180],
+            file_name=f"upload-{uuid.uuid4().hex}.ipynb",
+            kind="upload",
+            source_ref=f"assignment:{assignment.id}:upload",
+            environment_image=app_settings.environment_image,
+        )
+        self.db.add(notebook)
+        self.db.flush()
+        version, _ = NotebookVersionService(self.db).create_version(
+            notebook, document, kind="submission", actor_id=user.id, commit=False
+        )
+        return self._record_submission(user, assignment, notebook, version, attempt_number, now, is_late)
 
     def _submission_out(
         self,

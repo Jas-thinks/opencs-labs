@@ -31,6 +31,7 @@ from app.grading.schemas import (
 from app.grading.service import GradingService
 from app.integrations.notebooks import NotebookBackend, get_notebook_backend
 from app.notebooks.service import NotebookService
+from app.notebooks.uploads import NotebookUpload
 from app.users.models import User
 
 router = APIRouter(tags=["grading"])
@@ -173,6 +174,23 @@ def submit(
     return SubmissionOut(
         **service.submit(user, assignment_id, payload.notebook_id)
     )
+
+
+@router.post(
+    "/assignments/{assignment_id}/submissions/upload",
+    response_model=SubmissionOut,
+    status_code=201,
+)
+def submit_upload(
+    assignment_id: str,
+    payload: NotebookUpload,
+    request: Request,
+    user: User = Depends(get_current_user),
+    service: GradingService = Depends(_service),
+):
+    """Turn in an .ipynb file from the student's computer (no server needed)."""
+    enforce_rate_limit(request, "notebook-upload", 30)
+    return SubmissionOut(**service.submit_upload(user, assignment_id, payload))
 
 
 @router.get(

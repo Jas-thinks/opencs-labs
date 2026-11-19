@@ -217,6 +217,7 @@ only update labels, descriptions and maxima in place.
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | POST | `/assignments/{id}/submissions` | enrolled student | Submit a notebook snapshot |
+| POST | `/assignments/{id}/submissions/upload` | enrolled student | Turn in an uploaded `.ipynb` (`{file_name, notebook}`); no notebook server needed |
 | GET | `/assignments/{id}/submissions` | staff | Review queue (`status`, `late`, `cursor`) |
 | GET | `/submissions/{id}` | owner or staff | Submission detail |
 | GET | `/submissions/{id}/notebook` | owner or staff | Immutable snapshot document (`ETag`, immutable caching; `?download=1` for an attachment) |
@@ -282,7 +283,20 @@ score and sends an in-app notification. Staff `status` values are
     { "kind": "assignment", "target": "<assignment id>" } ] }
 ```
 
-Links must be `http(s)`. File attachments are not available yet (`422`).
+Links must be `http(s)`. The only file type accepted anywhere is **`.ipynb`**.
+
+**Notebook attachments.** Staff first upload the notebook, then reference it:
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/courses/{id}/notebook-uploads` | staff | `{file_name, notebook}` → `{sha256, file_name, size_bytes, cells}` |
+| GET | `/posts/{id}/attachments/{attachment_id}/notebook` | member | Download the `.ipynb` (`application/x-ipynb+json`) |
+| POST | `/posts/{id}/attachments/{attachment_id}/copy` | member | Copy into my notebook workspace (idempotent) → `{notebook_id, url}` |
+
+Attach with `{ "kind": "notebook", "target": "<sha256>", "label": "week1.ipynb" }`.
+Uploads must end in `.ipynb`, be valid nbformat 4 JSON and be at most 5 MB
+(`OPENCE_NOTEBOOK_UPLOAD_MAX_BYTES`); otherwise `422 NOT_A_NOTEBOOK`,
+`422 INVALID_NOTEBOOK` or `413 NOTEBOOK_TOO_LARGE`. Other file types are rejected.
 Students see published posts whose `publish_at` has passed; staff also see
 drafts and scheduled posts. The stream is one-way (no comments, ADR-010).
 

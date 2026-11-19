@@ -1174,3 +1174,19 @@ a.work-row:hover,
     align-items: flex-start;
   }
 }
+
+/* --- .ipynb uploads --------------------------------------------------------- */
+.attachment-notebook {
+  border-color: var(--border-strong);
+}
+.upload-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.upload-divider::before,
+.upload-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--border);
+}

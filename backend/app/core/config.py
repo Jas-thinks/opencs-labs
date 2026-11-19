@@ -97,6 +97,8 @@ class Settings(BaseSettings):
     jupyterhub_shards: str = ""
     notebook_backend: Literal["hub", "local", "disabled"] = "hub"
     notebook_start_timeout_seconds: int = 120
+    # Uploaded .ipynb files (post attachments, turn-in by upload).
+    notebook_upload_max_bytes: int = 5 * 1024 * 1024
     dataset_mount_path: str = "/opt/opencs/datasets"
     environment_image: str = "opencs/analytics:1.0.0"
     # Local (host-process) notebook backend: one JupyterLab server rooted at

@@ -692,7 +692,7 @@ export interface AddMembersResponse {
 }
 
 // --- stream -------------------------------------------------------------
-export type AttachmentKind = "link" | "dataset" | "lesson" | "exercise" | "assignment";
+export type AttachmentKind = "link" | "dataset" | "lesson" | "exercise" | "assignment" | "notebook";
 
 export interface AttachmentInput {
   kind: AttachmentKind;
@@ -706,6 +706,15 @@ export interface AttachmentOut {
   label: string;
   url: string | null;
   internal: boolean;
+  blob_sha256?: string | null;
+  size_bytes?: number | null;
+}
+
+export interface NotebookUploadOut {
+  sha256: string;
+  file_name: string;
+  size_bytes: number;
+  cells: number;
 }
 
 export interface PostOut {

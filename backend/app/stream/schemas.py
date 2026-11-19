@@ -8,12 +8,13 @@ from pydantic import BaseModel, Field
 
 PostKind = Literal["announcement", "material"]
 PostStatus = Literal["draft", "published"]
-AttachmentKind = Literal["link", "dataset", "lesson", "exercise", "assignment", "file"]
+AttachmentKind = Literal["link", "dataset", "lesson", "exercise", "assignment", "notebook", "file"]
 
 
 class AttachmentIn(BaseModel):
     kind: AttachmentKind
     # link: the external URL. dataset/lesson/exercise: slug. assignment: id.
+    # notebook: the sha256 returned by POST /courses/{id}/notebook-uploads.
     target: str = Field(min_length=1, max_length=2000)
     label: str | None = Field(default=None, max_length=240)
 
@@ -46,6 +47,8 @@ class AttachmentOut(BaseModel):
     url: str | None = None
     # True when url is an in-app route (render as a router link).
     internal: bool
+    blob_sha256: str | None = None
+    size_bytes: int | None = None
 
 
 class AuthorRef(BaseModel):
@@ -90,3 +93,17 @@ class ReaderOut(BaseModel):
 class ReadersResponse(BaseModel):
     read: list[ReaderOut]
     unread: list[ReaderOut]
+
+
+class NotebookUploadOut(BaseModel):
+    sha256: str
+    file_name: str
+    size_bytes: int
+    cells: int
+
+
+class CopyOut(BaseModel):
+    notebook_id: uuid.UUID
+    title: str
+    url: str
+    created: bool

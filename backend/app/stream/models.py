@@ -12,7 +12,7 @@ from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, utcnow
 
 POST_KINDS = ("announcement", "material")
 POST_STATUSES = ("draft", "published")
-ATTACHMENT_KINDS = ("link", "dataset", "lesson", "exercise", "assignment", "file")
+ATTACHMENT_KINDS = ("link", "dataset", "lesson", "exercise", "assignment", "notebook")
 
 
 class CoursePost(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -58,6 +58,9 @@ class CoursePostAttachment(UUIDPrimaryKeyMixin, Base):
     # External http(s) URL for links; in-app path for internal references.
     url: Mapped[str | None] = mapped_column(Text)
     label: Mapped[str] = mapped_column(String(240), nullable=False, default="")
+    # kind == "notebook": the uploaded .ipynb in the content-addressed store.
+    blob_sha256: Mapped[str | None] = mapped_column(String(64))
+    size_bytes: Mapped[int | None] = mapped_column(Integer)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     post: Mapped[CoursePost] = relationship(back_populates="attachments")

@@ -26,6 +26,7 @@ import type {
   MyGradesResponse,
   NotebookDocument,
   NotificationOut,
+  NotebookUploadOut,
   OpenNotebookResponse,
   PathsResponse,
   PostInput,
@@ -353,6 +354,23 @@ export const api = {
   markPostRead: (id: string) =>
     request<void>(`/posts/${encodeURIComponent(id)}/read`, { method: "POST" }),
   postReaders: (id: string) => request<ReadersResponse>(`/posts/${encodeURIComponent(id)}/readers`),
+  uploadNotebook: (courseId: string, file_name: string, notebook: NotebookDocument) =>
+    request<NotebookUploadOut>(`/courses/${encodeURIComponent(courseId)}/notebook-uploads`, {
+      method: "POST",
+      body: JSON.stringify({ file_name, notebook }),
+    }),
+  attachmentNotebookUrl: (postId: string, attachmentId: string) =>
+    `${API_BASE}/posts/${encodeURIComponent(postId)}/attachments/${encodeURIComponent(attachmentId)}/notebook`,
+  copyAttachment: (postId: string, attachmentId: string) =>
+    request<StartAssignmentOut>(
+      `/posts/${encodeURIComponent(postId)}/attachments/${encodeURIComponent(attachmentId)}/copy`,
+      { method: "POST" },
+    ),
+  submitUpload: (assignmentId: string, file_name: string, notebook: NotebookDocument) =>
+    request<SubmissionOut>(`/assignments/${encodeURIComponent(assignmentId)}/submissions/upload`, {
+      method: "POST",
+      body: JSON.stringify({ file_name, notebook }),
+    }),
 
   // notifications and personal views
   notifications: (params: { unread?: boolean; cursor?: string; limit?: number } = {}) =>
