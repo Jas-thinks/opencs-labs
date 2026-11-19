@@ -105,10 +105,15 @@ replace it with fakes, which is why the suite runs with no cluster.
 ```
 src/
 ├── api/            typed client + OpenAPI-derived types
-├── app/            AuthContext, routes, layout, useAsync
-├── components/     ui primitives, block renderer, SVG chart
+├── app/            AuthContext (persona + mode), role-aware routes and layout, useAsync
+├── components/     ui primitives, block renderer, SVG chart, NotebookView (sandboxed), kit
 ├── features/
 │   ├── auth/       login
+│   ├── classes/    class list, course shell + Stream/Classwork/People/Grades/Insights tabs,
+│   │               assignment editor (rubric builder) and student assignment page
+│   ├── grading/    grading workspace, to-grade queue, student progress, analytics
+│   ├── home/       student home
+│   ├── notifications/ bell + inbox
 │   ├── learning/   catalogue + lesson reader
 │   ├── practice/   catalogue + exercise workspace
 │   ├── datasets/   catalogue + dataset detail
