@@ -424,7 +424,11 @@ cmd_schema() {
 # CI-built artifact:  OPENCS_ARTIFACTS=<dir> deploy.sh cd
 cmd_cd() {
   [[ -f "$ART/SHA" ]] || die "no artifact in $ART"
-  local prev; prev=$(r edge "basename \$(readlink $ROOT/current)")
+  # A runner checkout is fresh: render the SSH config and env files first.
+  cmd_render
+  local prev
+  prev=$(r edge "basename \$(readlink $ROOT/current)") || die "cannot reach the edge node to read the running release"
+  [[ -n "$prev" ]] || die "could not determine the running release"
   say "deploying release $(cat "$ART/SHA") (running: $prev)"
   # Steps run in a child process: `set -e` is ignored inside an `if`, so the
   # child is what makes any failing command abort the deploy.
