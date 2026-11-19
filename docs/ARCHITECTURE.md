@@ -63,7 +63,12 @@ its models, schemas, service and router.
 | `app/db` | engine/session, declarative base, model registry |
 | `app/auth` | login, session issuance, current-user dependencies, role gates |
 | `app/users` | user model, profile and preferences |
-| `app/courses` | course and enrollment models |
+| `app/courses` | classes, enrollments, course-scoped permissions, members, join codes |
+| `app/grading` | assignments (lifecycle, starter notebooks), rubrics, submissions, draft/returned grade revisions |
+| `app/analytics` | student and class dashboards, drill-down, CSV export (released grades only) |
+| `app/stream` | one-way course stream: announcements, materials, attachments, read receipts (ADR-010) |
+| `app/notifications` | in-app inbox; fan-out runs in the job worker |
+| `app/teaching` | persona read models: gradebook, grading queue, student home |
 | `app/learning` | paths, modules, lessons, progress, notebook activity launch |
 | `app/practice` | exercise catalogue, attempts, evaluation, feedback |
 | `app/datasets` | manifests, catalogue, preview, snippet composition |

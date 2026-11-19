@@ -18,12 +18,16 @@ from app.notebooks.models import (  # noqa: F401
     NotebookSession,
     NotebookVersion,
 )
+from app.notifications.models import Notification  # noqa: F401
 from app.practice.models import Exercise, PracticeAttempt  # noqa: F401
+from app.stream.models import CoursePost, CoursePostAttachment, PostRead  # noqa: F401
 from app.users.models import User  # noqa: F401
 
 __all__ = [
     "Assignment",
     "Course",
+    "CoursePost",
+    "CoursePostAttachment",
     "Dataset",
     "DatasetVersion",
     "Enrollment",
@@ -38,6 +42,8 @@ __all__ = [
     "NotebookBlob",
     "NotebookSession",
     "NotebookVersion",
+    "Notification",
+    "PostRead",
     "PracticeAttempt",
     "Rubric",
     "RubricCriterion",

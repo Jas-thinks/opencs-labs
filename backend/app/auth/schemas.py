@@ -8,6 +8,16 @@ from pydantic import BaseModel, Field
 from app.core.validation import EmailAddress
 
 
+class TeachingSummary(BaseModel):
+    """Drives the teacher vs student experience in the UI. Computed server-side;
+    every endpoint still enforces course-scoped permissions on its own."""
+
+    is_teacher: bool = False
+    staff_course_count: int = 0
+    student_course_count: int = 0
+    can_create_courses: bool = False
+
+
 class UserOut(BaseModel):
     id: uuid.UUID
     email: EmailAddress
@@ -15,6 +25,7 @@ class UserOut(BaseModel):
     role: str
     hub_username: str
     preferences: dict = Field(default_factory=dict)
+    teaching: TeachingSummary = Field(default_factory=TeachingSummary)
 
     model_config = {"from_attributes": True}
 

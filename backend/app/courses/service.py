@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import secrets
 import uuid
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.errors import NotFound
+from app.core.errors import Conflict, Forbidden, NotFound
 from app.courses.models import Course, Enrollment
 from app.courses.permissions import (
     get_course,
@@ -52,7 +53,184 @@ class CourseService:
             "status": course.status,
             "description": course.description,
             "role_in_course": role,
+            "join_code": course.join_code if role in ("instructor", "admin", "staff") else None,
         }
+
+    # -- course management ----------------------------------------------
+    def create_course(self, user: User, payload) -> dict:
+        """Instructors create their own classes (ADR-010, D5)."""
+        if user.role not in ("instructor", "admin"):
+            raise Forbidden("Only instructors can create classes")
+        code = payload.code.strip().upper()
+        if self.db.scalar(select(Course.id).where(Course.code == code)) is not None:
+            raise Conflict("COURSE_CODE_TAKEN", "A class with this code already exists")
+        course = Course(
+            name=payload.name.strip(),
+            code=code,
+            term=payload.term.strip(),
+            description=payload.description,
+            status="active",
+            created_by=user.id,
+        )
+        self.db.add(course)
+        self.db.flush()
+        self.db.add(Enrollment(course_id=course.id, user_id=user.id, role_in_course="instructor"))
+        self.db.commit()
+        self.db.refresh(course)
+        return self._course_out(course, "instructor")
+
+    def update_course(self, user: User, course_id: str, payload) -> dict:
+        course = get_course(self.db, course_id)
+        role = require_course_instructor(self.db, user, course.id)
+        for field, value in payload.model_dump(exclude_unset=True).items():
+            if value is not None:
+                setattr(course, field, value.strip() if isinstance(value, str) and field != "description" else value)
+        if course.status == "archived":
+            course.join_code = None  # an archived class accepts no new members
+        self.db.commit()
+        self.db.refresh(course)
+        return self._course_out(course, role)
+
+    # -- self-enrolment --------------------------------------------------
+    _CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I ambiguity
+
+    def rotate_join_code(self, user: User, course_id: str) -> dict:
+        course = get_course(self.db, course_id)
+        role = require_course_instructor(self.db, user, course.id)
+        if course.status == "archived":
+            raise Conflict("COURSE_ARCHIVED", "Archived classes cannot accept new students")
+        while True:
+            code = "".join(secrets.choice(self._CODE_ALPHABET) for _ in range(7))
+            if self.db.scalar(select(Course.id).where(Course.join_code == code)) is None:
+                break
+        course.join_code = code
+        self.db.commit()
+        return self._course_out(course, role)
+
+    def disable_join_code(self, user: User, course_id: str) -> dict:
+        course = get_course(self.db, course_id)
+        role = require_course_instructor(self.db, user, course.id)
+        course.join_code = None
+        self.db.commit()
+        return self._course_out(course, role)
+
+    def join(self, user: User, code: str) -> dict:
+        course = self.db.scalar(
+            select(Course).where(Course.join_code == code.strip().upper())
+        )
+        # One message for unknown, disabled and archived: codes are not probe-able.
+        if course is None or course.status == "archived":
+            raise NotFound("class code")
+        enrollment = self.db.scalar(
+            select(Enrollment).where(
+                Enrollment.course_id == course.id, Enrollment.user_id == user.id
+            )
+        )
+        if enrollment is None:
+            enrollment = Enrollment(course_id=course.id, user_id=user.id, role_in_course="student")
+            self.db.add(enrollment)
+            self.db.commit()
+        return self._course_out(course, enrollment.role_in_course)
+
+    # -- members (all roles; the roster is students-with-progress) -------
+    def members(self, user: User, course_id: str) -> list[dict]:
+        course = get_course(self.db, course_id)
+        require_course_staff(self.db, user, course.id)
+        order = {"instructor": 0, "ta": 1, "student": 2}
+        rows = self.db.execute(
+            select(User, Enrollment)
+            .join(Enrollment, Enrollment.user_id == User.id)
+            .where(Enrollment.course_id == course.id)
+        ).all()
+        rows.sort(key=lambda row: (order.get(row[1].role_in_course, 9), row[0].display_name.lower()))
+        return [self._member_out(member, enrollment) for member, enrollment in rows]
+
+    @staticmethod
+    def _member_out(member: User, enrollment: Enrollment) -> dict:
+        return {
+            "user_id": member.id,
+            "email": member.email,
+            "display_name": member.display_name,
+            "role_in_course": enrollment.role_in_course,
+            "joined_at": enrollment.created_at,
+        }
+
+    def add_members(self, user: User, course_id: str, emails: list[str], role: str) -> dict:
+        course = get_course(self.db, course_id)
+        require_course_instructor(self.db, user, course.id)
+        wanted = []
+        for raw in emails:
+            email = raw.strip().lower()
+            if email and email not in wanted:
+                wanted.append(email)
+        known = {
+            member.email.lower(): member
+            for member in self.db.scalars(select(User).where(func.lower(User.email).in_(wanted)))
+        }
+        existing = {
+            enrollment.user_id: enrollment
+            for enrollment in self.db.scalars(
+                select(Enrollment).where(
+                    Enrollment.course_id == course.id,
+                    Enrollment.user_id.in_([member.id for member in known.values()]),
+                )
+            )
+        }
+        added, updated, unknown = [], [], []
+        for email in wanted:
+            member = known.get(email)
+            if member is None:
+                unknown.append(email)
+                continue
+            enrollment = existing.get(member.id)
+            if enrollment is None:
+                enrollment = Enrollment(course_id=course.id, user_id=member.id, role_in_course=role)
+                self.db.add(enrollment)
+                self.db.flush()
+                added.append(self._member_out(member, enrollment))
+            elif enrollment.role_in_course != role:
+                enrollment.role_in_course = role
+                updated.append(self._member_out(member, enrollment))
+        self._ensure_instructor_remains(course.id)
+        self.db.commit()
+        return {"added": added, "updated": updated, "unknown": unknown}
+
+    def remove_member(self, user: User, course_id: str, target_user_id: str) -> None:
+        course = get_course(self.db, course_id)
+        require_course_instructor(self.db, user, course.id)
+        enrollment = self._enrollment(course.id, target_user_id)
+        self.db.delete(enrollment)
+        self.db.flush()
+        self._ensure_instructor_remains(course.id)
+        self.db.commit()
+
+    def _enrollment(self, course_id: uuid.UUID, target_user_id: str) -> Enrollment:
+        try:
+            target_uuid = uuid.UUID(str(target_user_id))
+        except ValueError as exc:
+            raise NotFound("enrollment", target_user_id) from exc
+        enrollment = self.db.scalar(
+            select(Enrollment).where(
+                Enrollment.course_id == course_id, Enrollment.user_id == target_uuid
+            )
+        )
+        if enrollment is None:
+            raise NotFound("enrollment", target_user_id)
+        return enrollment
+
+    def _ensure_instructor_remains(self, course_id: uuid.UUID) -> None:
+        self.db.flush()
+        remaining = self.db.scalar(
+            select(func.count())
+            .select_from(Enrollment)
+            .where(Enrollment.course_id == course_id, Enrollment.role_in_course == "instructor")
+        )
+        if not remaining:
+            self.db.rollback()
+            raise Conflict(
+                "LAST_INSTRUCTOR",
+                "A class must keep at least one instructor. Add another instructor first.",
+            )
 
     # -- roster ----------------------------------------------------------
     def roster(self, user: User, course_id: str, *, limit: int = 50, offset: int = 0) -> dict:
@@ -182,6 +360,7 @@ class CourseService:
                     "role_in_course": item.role_in_course,
                 }
             )
+        self._ensure_instructor_remains(course.id)
         self.db.commit()
         return results
 
@@ -211,6 +390,7 @@ class CourseService:
         if enrollment is None:
             raise NotFound("enrollment", target_user_id)
         enrollment.role_in_course = role
+        self._ensure_instructor_remains(course.id)
         self.db.commit()
         target = self.db.get(User, target_uuid)
         return {

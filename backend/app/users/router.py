@@ -5,7 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.auth.schemas import PreferencesUpdate, UserOut
+from app.auth.schemas import PreferencesUpdate, TeachingSummary, UserOut
+from app.courses.permissions import teaching_summary
 from app.auth.service import get_current_user
 from app.db.session import get_db
 from app.users.models import User
@@ -14,8 +15,10 @@ router = APIRouter(tags=["users"])
 
 
 @router.get("/me", response_model=UserOut)
-def me(user: User = Depends(get_current_user)):
-    return UserOut.model_validate(user)
+def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    out = UserOut.model_validate(user)
+    out.teaching = TeachingSummary(**teaching_summary(db, user))
+    return out
 
 
 @router.get("/me/preferences")

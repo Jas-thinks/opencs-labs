@@ -158,14 +158,24 @@ def test_submission_and_grading_flow(
     assert graded.json()["total_points"] == 96
     assert graded.json()["final_score"] == 96
 
+    # Overriding the rubric total requires a reason (audit trail).
+    no_reason = instructor_client.post(
+        f"/api/v1/submissions/{body['id']}/grade",
+        json={**grade_payload, "final_score": 90},
+    )
+    assert no_reason.status_code == 409
+    assert no_reason.json()["error"]["code"] == "OVERRIDE_REASON_REQUIRED"
+
     # Regrading creates a new revision, never edits the first.
     regraded = instructor_client.post(
         f"/api/v1/submissions/{body['id']}/grade",
-        json={**grade_payload, "final_score": 90},
+        json={**grade_payload, "final_score": 90, "override_reason": "Late-day policy"},
     )
     assert regraded.status_code == 200
     assert regraded.json()["revision"] == 2
     assert regraded.json()["final_score"] == 90
+    assert regraded.json()["override_reason"] == "Late-day policy"
+    assert regraded.json()["state"] == "released"
 
     revisions = instructor_client.get(f"/api/v1/submissions/{body['id']}/grades")
     assert [item["revision"] for item in revisions.json()["grades"]] == [2, 1]

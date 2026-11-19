@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import Forbidden, NotFound
@@ -68,3 +68,22 @@ def require_course_instructor(db: Session, user: User, course_id: str | uuid.UUI
     if role not in ("admin", "instructor", "staff"):
         raise Forbidden("This action requires the course instructor")
     return role
+
+
+def teaching_summary(db: Session, user: User) -> dict:
+    """Is this person a teacher anywhere? (global instructor/admin, or staff in
+    any class: the seeded TA has global role 'student' but course role 'ta')."""
+    rows = db.execute(
+        select(Enrollment.role_in_course, func.count())
+        .where(Enrollment.user_id == user.id)
+        .group_by(Enrollment.role_in_course)
+    ).all()
+    counts = {role: int(count) for role, count in rows}
+    staff = sum(count for role, count in counts.items() if role in STAFF_ROLES)
+    is_global_teacher = user.role in ("instructor", "admin")
+    return {
+        "is_teacher": is_global_teacher or staff > 0,
+        "staff_course_count": staff,
+        "student_course_count": counts.get("student", 0),
+        "can_create_courses": is_global_teacher,
+    }

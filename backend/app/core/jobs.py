@@ -60,7 +60,7 @@ def enqueue(
     return job
 
 
-MAINTENANCE_KINDS = ("close_idle_sessions", "prune_autosaves")
+MAINTENANCE_KINDS = ("close_idle_sessions", "prune_autosaves", "publish_due_posts")
 
 
 def schedule_maintenance(session_factory: sessionmaker = SessionLocal) -> int:
@@ -95,6 +95,8 @@ class JobWorker:
             "prune_autosaves": _handle_prune_autosaves,
             "close_idle_sessions": _handle_close_idle_sessions,
             "notify_grade": _handle_notify_grade,
+            "notify_post": _handle_notify_post,
+            "publish_due_posts": _handle_publish_due_posts,
             "recompute_rollups": _handle_recompute_rollups,
         }
 
@@ -190,6 +192,14 @@ class JobWorker:
 
 
 # -- handlers -------------------------------------------------------------
+def _uuid_or_none(value) -> uuid.UUID | None:
+    """Notification jobs must not fail (and retry forever) on a stale reference."""
+    try:
+        return uuid.UUID(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
 def _handle_prune_autosaves(db, payload: dict) -> None:
     from app.notebooks.versions import NotebookVersionService
 
@@ -212,13 +222,75 @@ def _handle_close_idle_sessions(db, payload: dict) -> None:
 
 
 def _handle_notify_grade(db, payload: dict) -> None:
-    # In-app notifications are not part of this schema revision; the handler
-    # is the seam where an email/notification adapter will attach.
-    logger.info(
-        "grade notification: submission=%s student=%s",
-        payload.get("submission_id"),
-        payload.get("user_id"),
+    """A grade was returned: tell the student (in-app; email can attach here)."""
+    from app.grading.models import Assignment, Submission
+    from app.notifications.models import Notification
+
+    submission_id = _uuid_or_none(payload.get("submission_id"))
+    submission = db.get(Submission, submission_id) if submission_id else None
+    if submission is None:
+        logger.info("grade notification skipped: unknown submission %s", payload.get("submission_id"))
+        return
+    assignment = db.get(Assignment, submission.assignment_id)
+    if assignment is None:
+        return
+    db.add(
+        Notification(
+            user_id=submission.user_id,
+            kind="grade_returned",
+            course_id=assignment.course_id,
+            ref_type="submission",
+            ref_id=submission.id,
+            title=f"Your work on “{assignment.title}” was returned",
+            link=f"/classes/{assignment.course_id}/classwork/{assignment.id}",
+        )
     )
+
+
+def _handle_notify_post(db, payload: dict) -> None:
+    """Fan a newly visible announcement/material out to the class."""
+    from app.notifications.service import fan_out_to_students
+    from app.stream.models import CoursePost
+
+    post_id = _uuid_or_none(payload.get("post_id"))
+    post = db.get(CoursePost, post_id) if post_id else None
+    if post is None or post.deleted_at is not None or post.status != "published":
+        return
+    noun = "announcement" if post.kind == "announcement" else "material"
+    headline = post.title or (post.body.strip().splitlines() or [""])[0]
+    count = fan_out_to_students(
+        db,
+        course_id=post.course_id,
+        kind=f"new_{noun}",
+        ref_type="post",
+        ref_id=post.id,
+        title=f"New {noun}: {headline[:200]}",
+        link=f"/classes/{post.course_id}/stream#post-{post.id}",
+        exclude_user_id=post.author_id,
+    )
+    logger.info("post %s notified %s students", post.id, count)
+
+
+def _handle_publish_due_posts(db, payload: dict) -> None:
+    """Scheduled posts become visible at query time; this only fans out their
+    notifications once publish_at has passed (cadence: maintenance tick)."""
+    from app.stream.models import CoursePost
+
+    now = utcnow()
+    due = list(
+        db.scalars(
+            select(CoursePost).where(
+                CoursePost.status == "published",
+                CoursePost.deleted_at.is_(None),
+                CoursePost.published_at.is_(None),
+                CoursePost.publish_at.is_not(None),
+                CoursePost.publish_at <= now,
+            )
+        )
+    )
+    for post in due:
+        post.published_at = now
+        enqueue(db, "notify_post", {"post_id": str(post.id)})
 
 
 def _handle_recompute_rollups(db, payload: dict) -> None:

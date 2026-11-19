@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 AssignmentKind = Literal["practice", "project", "exam"]
 SubmissionStatus = Literal["submitted", "graded", "returned"]
+INSTRUCTIONS_MAX = 20000
 
 
 class AssignmentCreate(BaseModel):
@@ -15,13 +16,18 @@ class AssignmentCreate(BaseModel):
     slug: str | None = Field(default=None, max_length=120)
     exercise_slug: str | None = Field(default=None, max_length=120)
     kind: AssignmentKind = "practice"
-    description: str = Field(default="", max_length=2000)
+    description: str = Field(default="", max_length=INSTRUCTIONS_MAX)
+    topic: str | None = Field(default=None, max_length=120)
     due_at: dt.datetime | None = None
+    publish_at: dt.datetime | None = None
     max_points: float = Field(default=100, gt=0)
     weight: float = Field(default=1, ge=0)
     allow_late: bool = True
     late_penalty_pct: int = Field(default=0, ge=0, le=100)
     is_published: bool = False
+    # One of the instructor's own notebooks; snapshotted immutably as the
+    # starter every student copies.
+    starter_notebook_id: uuid.UUID | None = None
 
 
 class AssignmentUpdate(BaseModel):
@@ -29,8 +35,12 @@ class AssignmentUpdate(BaseModel):
     slug: str | None = Field(default=None, max_length=120)
     exercise_slug: str | None = Field(default=None, max_length=120)
     kind: AssignmentKind | None = None
-    description: str | None = Field(default=None, max_length=2000)
+    description: str | None = Field(default=None, max_length=INSTRUCTIONS_MAX)
+    topic: str | None = Field(default=None, max_length=120)
     due_at: dt.datetime | None = None
+    publish_at: dt.datetime | None = None
+    starter_notebook_id: uuid.UUID | None = None
+    clear_starter: bool = False
     max_points: float | None = Field(default=None, gt=0)
     weight: float | None = Field(default=None, ge=0)
     allow_late: bool | None = None
@@ -47,15 +57,34 @@ class AssignmentOut(BaseModel):
     kind: str
     title: str
     description: str
+    topic: str | None = None
     due_at: dt.datetime | None = None
+    publish_at: dt.datetime | None = None
+    archived_at: dt.datetime | None = None
     max_points: float
     weight: float
     allow_late: bool
     late_penalty_pct: int
     is_published: bool
+    # published, not archived and past publish_at: what students actually see
+    is_visible: bool = False
+    has_starter: bool = False
     created_by: uuid.UUID
     created_at: dt.datetime
     updated_at: dt.datetime
+    # Staff-only counters (None for students).
+    submission_count: int | None = None
+    # Student-only: my latest submission for this assignment.
+    my_submission: "MySubmissionRef | None" = None
+
+
+class MySubmissionRef(BaseModel):
+    id: uuid.UUID
+    attempt_number: int
+    status: str
+    is_late: bool
+    final_score: float | None = None
+    submitted_at: dt.datetime
 
 
 class AssignmentListResponse(BaseModel):
@@ -107,6 +136,13 @@ class StudentRef(BaseModel):
     display_name: str
 
 
+class StartAssignmentOut(BaseModel):
+    notebook_id: uuid.UUID
+    title: str
+    url: str
+    created: bool
+
+
 class SubmissionOut(BaseModel):
     id: uuid.UUID
     assignment_id: uuid.UUID
@@ -122,6 +158,8 @@ class SubmissionOut(BaseModel):
     submitted_at: dt.datetime
     graded_at: dt.datetime | None = None
     notebook_version: NotebookVersionRef | None = None
+    # Staff-only: a newer grade revision is saved but not yet returned.
+    has_draft: bool = False
 
 
 class SubmissionListResponse(BaseModel):
@@ -140,6 +178,9 @@ class GradeRequest(BaseModel):
     feedback: str = Field(default="", max_length=20000)
     final_score: float | None = Field(default=None, ge=0)
     override_reason: str | None = Field(default=None, max_length=2000)
+    # False = save as a draft visible only to course staff. Defaults to True so
+    # existing API clients keep the original publish-on-save behaviour.
+    release: bool = True
 
 
 class CriterionScoreOut(BaseModel):
@@ -158,9 +199,12 @@ class GradeOut(BaseModel):
     rubric_id: uuid.UUID
     total_points: float
     final_score: float | None = None
+    override_reason: str | None = None
     feedback: str
     graded_by: uuid.UUID
     published_at: dt.datetime
+    released_at: dt.datetime | None = None
+    state: Literal["draft", "released"] = "released"
     criteria: list[CriterionScoreOut] = Field(default_factory=list)
 
 
@@ -171,6 +215,20 @@ class GradeListResponse(BaseModel):
 class SubmissionDetailOut(SubmissionOut):
     latest_grade: GradeOut | None = None
     rubric: RubricOut | None = None
+    assignment_title: str | None = None
+    max_points: float | None = None
+    attempts: list["AttemptRef"] = Field(default_factory=list)
+
+
+class AttemptRef(BaseModel):
+    id: uuid.UUID
+    attempt_number: int
+    submitted_at: dt.datetime
+    is_late: bool
+
+
+class ReturnResult(BaseModel):
+    returned: int
 
 
 class MyGradeOut(BaseModel):
@@ -184,7 +242,12 @@ class MyGradeOut(BaseModel):
     max_points: float
     published_at: dt.datetime | None = None
     revision: int | None = None
+    feedback: str = ""
 
 
 class MyGradesResponse(BaseModel):
     grades: list[MyGradeOut]
+
+
+AssignmentOut.model_rebuild()
+SubmissionDetailOut.model_rebuild()

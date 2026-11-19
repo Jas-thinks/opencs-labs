@@ -18,6 +18,9 @@ from sqlalchemy import text
 
 from app import __version__
 from app.analytics.router import router as analytics_router
+from app.notifications.router import router as notifications_router
+from app.stream.router import router as stream_router
+from app.teaching.router import router as teaching_router
 from app.auth.router import router as auth_router
 from app.core import telemetry
 from app.core.config import settings
@@ -108,6 +111,9 @@ def create_app() -> FastAPI:
     app.include_router(courses_router, prefix=prefix)
     app.include_router(grading_router, prefix=prefix)
     app.include_router(analytics_router, prefix=prefix)
+    app.include_router(stream_router, prefix=prefix)
+    app.include_router(notifications_router, prefix=prefix)
+    app.include_router(teaching_router, prefix=prefix)
 
     @app.get("/health", tags=["ops"])
     def health():

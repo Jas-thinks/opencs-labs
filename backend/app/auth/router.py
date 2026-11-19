@@ -9,7 +9,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
-from app.auth.schemas import LoginRequest, LoginResponse, TokenResponse, UserOut
+from app.auth.schemas import LoginRequest, LoginResponse, TeachingSummary, TokenResponse, UserOut
+from app.courses.permissions import teaching_summary
 from app.auth.service import (
     authenticate_dev,
     clear_session_cookie,
@@ -32,7 +33,9 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
         raise Unauthenticated("Incorrect email or password")
     token = issue_session(user)
     set_session_cookie(response, token)
-    return LoginResponse(user=UserOut.model_validate(user), expires_in=settings.session_ttl_seconds)
+    out = UserOut.model_validate(user)
+    out.teaching = TeachingSummary(**teaching_summary(db, user))
+    return LoginResponse(user=out, expires_in=settings.session_ttl_seconds)
 
 
 @router.post("/token", response_model=TokenResponse)

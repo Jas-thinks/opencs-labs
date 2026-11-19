@@ -18,6 +18,11 @@ class Course(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     term: Mapped[str] = mapped_column(String(40), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     description: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
+    # Student self-enrolment code; NULL = disabled.
+    join_code: Mapped[str | None] = mapped_column(String(12), unique=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
 
     enrollments: Mapped[list["Enrollment"]] = relationship(back_populates="course")
 

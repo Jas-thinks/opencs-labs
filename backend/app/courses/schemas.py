@@ -17,6 +17,49 @@ class CourseOut(BaseModel):
     status: str
     description: str = ""
     role_in_course: str
+    # Instructor-only: the active self-enrolment code (None when disabled).
+    join_code: str | None = None
+
+
+class CourseCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    code: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9][A-Za-z0-9 ._-]*$")
+    term: str = Field(min_length=1, max_length=40)
+    description: str = Field(default="", max_length=1000)
+
+
+class CourseUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    term: str | None = Field(default=None, min_length=1, max_length=40)
+    description: str | None = Field(default=None, max_length=1000)
+    status: Literal["active", "archived"] | None = None
+
+
+class JoinRequest(BaseModel):
+    code: str = Field(min_length=4, max_length=12)
+
+
+class MemberOut(BaseModel):
+    user_id: uuid.UUID
+    email: str
+    display_name: str
+    role_in_course: str
+    joined_at: dt.datetime | None = None
+
+
+class MembersResponse(BaseModel):
+    members: list[MemberOut]
+
+
+class AddMembersRequest(BaseModel):
+    emails: list[str] = Field(min_length=1, max_length=1000)
+    role_in_course: CourseRole = "student"
+
+
+class AddMembersResponse(BaseModel):
+    added: list[MemberOut]
+    updated: list[MemberOut]
+    unknown: list[str]
 
 
 class CourseListResponse(BaseModel):

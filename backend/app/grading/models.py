@@ -41,13 +41,23 @@ class Assignment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     slug: Mapped[str] = mapped_column(String(120), nullable=False)
     kind: Mapped[str] = mapped_column(String(20), nullable=False, default="practice")
     title: Mapped[str] = mapped_column(String(240), nullable=False)
-    description: Mapped[str] = mapped_column(String(2000), nullable=False, default="")
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    topic: Mapped[str | None] = mapped_column(String(120))
     due_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     max_points: Mapped[float] = mapped_column(Float, nullable=False, default=100.0)
     weight: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     allow_late: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     late_penalty_pct: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Scheduled release: visible to students once is_published and
+    # publish_at <= now (evaluated at query time; no scheduler needed).
+    publish_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    # Archived work is hidden from students and dashboards; grades are kept.
+    archived_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    # Immutable snapshot students copy when they start the assignment.
+    starter_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("notebook_versions.id", ondelete="SET NULL")
+    )
     created_by: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
@@ -153,6 +163,12 @@ class SubmissionGrade(UUIDPrimaryKeyMixin, Base):
     published_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow
     )
+    # NULL = draft, visible to course staff only. Set when returned to the student.
+    released_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    # Score of this revision (rubric total unless overridden) and the reason
+    # for an override, kept per revision so history is auditable.
+    final_score: Mapped[float | None] = mapped_column(Float)
+    override_reason: Mapped[str | None] = mapped_column(Text)
 
 
 class GradeCriterionScore(UUIDPrimaryKeyMixin, Base):

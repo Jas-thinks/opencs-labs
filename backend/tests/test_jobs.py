@@ -15,13 +15,13 @@ from app.notebooks.versions import NotebookVersionService
 
 
 def test_maintenance_jobs_are_scheduled_once(session_factory):
-    assert schedule_maintenance(session_factory) == 2
+    assert schedule_maintenance(session_factory) == 3
     assert schedule_maintenance(session_factory) == 0
 
     session = session_factory()
     try:
         kinds = sorted(session.scalars(select(Job.kind)).all())
-        assert kinds == ["close_idle_sessions", "prune_autosaves"]
+        assert kinds == ["close_idle_sessions", "prune_autosaves", "publish_due_posts"]
     finally:
         session.close()
 

@@ -1,6 +1,6 @@
 # ADR-009: Notebook state, manual grading and analytics
 
-**Status:** Accepted
+**Status:** Accepted; decision 5 amended by [ADR-010](010-teacher-experience-and-course-stream.md) (draft -> return grading)
 
 ## Context
 

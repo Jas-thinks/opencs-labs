@@ -145,10 +145,21 @@ rate limited to 12 requests/minute per notebook.
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | GET | `/courses` | authenticated | Courses you are enrolled in or staff |
-| GET | `/courses/{course_id}` | member | Course detail |
-| GET | `/courses/{course_id}/roster` | staff | Roster with progress/grade summary |
+| POST | `/courses` | global instructor/admin | Create a class; the creator becomes its instructor |
+| GET | `/courses/{course_id}` | member | Course detail (`join_code` shown to instructors only) |
+| PATCH | `/courses/{course_id}` | instructor | Edit name/term/description; `status: archived` makes it read-only |
+| GET | `/courses/{course_id}/roster` | staff | Roster with progress/grade summary (students) |
+| GET | `/courses/{course_id}/members` | staff | Everyone in the class with their course role |
+| POST | `/courses/{course_id}/members` | instructor | Add by email `{emails[], role_in_course}` → `{added, updated, unknown}` |
 | POST | `/courses/{course_id}/enrollments` | instructor/admin | Bulk enroll/update |
 | PATCH | `/courses/{course_id}/enrollments/{user_id}` | instructor/admin | Change `role_in_course` |
+| DELETE | `/courses/{course_id}/enrollments/{user_id}` | instructor/admin | Remove a member |
+| POST / DELETE | `/courses/{course_id}/join-code` | instructor | Rotate / disable the self-enrolment code |
+| POST | `/courses/join` | authenticated | `{code}` → enrol as student (404 for unknown, disabled or archived) |
+| GET | `/courses/{course_id}/gradebook` | staff | Students × assignments: state, score, weighted % (returned work) |
+
+A class always keeps at least one instructor: removing or demoting the last one
+returns `409 LAST_INSTRUCTOR`.
 
 Course roles are `student`, `ta` and `instructor`. Non-members receive `404`;
 members without the required role receive `403`. A global `admin` bypasses
@@ -162,10 +173,13 @@ last_active_at }`.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| POST | `/courses/{course_id}/assignments` | instructor/admin | Create assignment |
-| GET | `/courses/{course_id}/assignments` | member | List (students see published only) |
+| POST | `/courses/{course_id}/assignments` | instructor/admin | Create assignment (adds a default "Overall" rubric) |
+| GET | `/courses/{course_id}/assignments` | member | List. Students: visible only, with `my_submission`. Staff: all non-archived (`include_archived=true` for all), with `submission_count` |
 | GET | `/assignments/{assignment_id}` | member | Detail |
-| PATCH | `/assignments/{assignment_id}` | instructor/admin | Update |
+| PATCH | `/assignments/{assignment_id}` | instructor/admin | Update (unpublishing with submissions → `409 HAS_SUBMISSIONS`) |
+| DELETE | `/assignments/{assignment_id}` | instructor/admin | Delete; `409 HAS_SUBMISSIONS` if anyone submitted |
+| POST | `/assignments/{assignment_id}/archive` · `/unarchive` | instructor/admin | Hide from students and dashboards, keep grades |
+| POST | `/assignments/{assignment_id}/start` | enrolled student | Create/open my working copy of the starter notebook |
 | PUT | `/assignments/{assignment_id}/rubric` | instructor/admin | Upsert rubric + criteria |
 | GET | `/assignments/{assignment_id}/rubric` | member | Read (students get labels/max only) |
 
@@ -175,8 +189,14 @@ Create assignment:
 { "title": "Iris selection", "exercise_slug": "pandas-select-iris",
   "kind": "practice", "due_at": "2026-12-01T23:59:00Z",
   "max_points": 100, "weight": 1, "allow_late": true,
-  "late_penalty_pct": 10, "is_published": true }
+  "late_penalty_pct": 10, "is_published": true,
+  "publish_at": "2026-11-25T08:00:00Z", "topic": "Week 3",
+  "starter_notebook_id": "…" }
 ```
+
+A student sees an assignment when it is published, not archived and past
+`publish_at`. `starter_notebook_id` is one of the instructor's notebooks; it is
+snapshotted immutably and each student's copy has outputs cleared.
 
 Rubric upsert:
 
@@ -199,10 +219,12 @@ only update labels, descriptions and maxima in place.
 | POST | `/assignments/{id}/submissions` | enrolled student | Submit a notebook snapshot |
 | GET | `/assignments/{id}/submissions` | staff | Review queue (`status`, `late`, `cursor`) |
 | GET | `/submissions/{id}` | owner or staff | Submission detail |
-| GET | `/submissions/{id}/notebook` | owner or staff | Immutable snapshot document |
-| POST | `/submissions/{id}/grade` | staff | Publish a grade revision (rate limited) |
-| GET | `/submissions/{id}/grades` | owner or staff | All revisions, newest first |
-| GET | `/me/grades` | student | Published grades (`course_id` optional) |
+| GET | `/submissions/{id}/notebook` | owner or staff | Immutable snapshot document (`ETag`, immutable caching; `?download=1` for an attachment) |
+| POST | `/submissions/{id}/grade` | staff | Save a grade revision; `release: false` keeps it a draft (rate limited) |
+| POST | `/submissions/{id}/return` | staff | Return the latest draft to the student |
+| POST | `/assignments/{id}/return` | staff | Return every draft for the assignment → `{returned}` |
+| GET | `/submissions/{id}/grades` | owner or staff | Revisions, newest first (owners: released only) |
+| GET | `/me/grades` | student | Returned grades with feedback (`course_id` optional) |
 
 Submit: `{ "notebook_id": "…" }` → `201 SubmissionOut`. Late submissions are
 flagged when `allow_late` is true and rejected with `409 ASSIGNMENT_CLOSED`
@@ -220,13 +242,62 @@ Grade:
     { "criterion_id": "…", "points": 18, "comment": "Add spacing" }
   ],
   "feedback": "Nice work overall.",
-  "final_score": null }
+  "final_score": null,
+  "override_reason": null,
+  "release": false }
 ```
 
 Every criterion must be scored exactly once and within `[0, max_points]`.
-Publishing is immediate. A regrade inserts revision 2; earlier revisions are
-never overwritten. `final_score: null` uses the rubric total; a non-null value
-is the TA override.
+A regrade inserts a new revision; earlier revisions are never overwritten.
+`final_score: null` uses the rubric total; a different value requires
+`override_reason` (`409 OVERRIDE_REASON_REQUIRED`), which is stored per revision.
+
+**Draft → return (ADR-010).** `release` defaults to `true` (publish on save, the
+original behaviour). With `release: false` the revision is a staff-only draft:
+students keep seeing their last returned grade and the status `submitted`/`graded`
+they saw before. Returning sets `released_at`, updates the student-visible
+score and sends an in-app notification. Staff `status` values are
+`submitted | graded` (unreturned draft) `| returned`; the review queue accepts
+`status=draft`.
+
+## Course stream
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/courses/{id}/posts` | member | Feed: pinned first, newest first (`kind`, `cursor`, `limit`) |
+| POST | `/courses/{id}/posts` | staff (instructor or TA) | Announcement or material |
+| GET / PATCH / DELETE | `/posts/{id}` | member / author or instructor | Read, edit, soft-delete |
+| POST | `/posts/{id}/read` | member | Mark read (idempotent) |
+| GET | `/posts/{id}/readers` | staff | Read receipts: `{read[], unread[]}` |
+
+```json
+{ "kind": "material", "title": "Week 1 resources", "body": "Markdown…",
+  "topic": "Week 1", "is_pinned": false, "status": "published",
+  "publish_at": null,
+  "attachments": [
+    { "kind": "link", "target": "https://pandas.pydata.org/docs/" },
+    { "kind": "dataset", "target": "iris" },
+    { "kind": "lesson", "target": "intro-to-pandas" },
+    { "kind": "exercise", "target": "pandas-select-iris" },
+    { "kind": "assignment", "target": "<assignment id>" } ] }
+```
+
+Links must be `http(s)`. File attachments are not available yet (`422`).
+Students see published posts whose `publish_at` has passed; staff also see
+drafts and scheduled posts. The stream is one-way (no comments, ADR-010).
+
+## Notifications and personal views
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/me/notifications` | authenticated | Inbox (`unread`, `cursor`, `limit`) |
+| GET | `/me/notifications/count` | authenticated | `{unread}`; polled by the UI |
+| POST | `/me/notifications/read` | authenticated | `{ids?}`; no ids marks all read |
+| GET | `/me/home` | authenticated | Student home: due soon, latest posts, recent feedback |
+| GET | `/teaching/queue` | staff | Ungraded and draft counts across my classes |
+
+`GET /me` and the login response include
+`teaching: {is_teacher, staff_course_count, student_course_count, can_create_courses}`.
 
 ## Analytics
 

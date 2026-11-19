@@ -30,7 +30,7 @@ from app.analytics.schemas import (
     TrendItem,
 )
 from app.core.errors import NotFound
-from app.core.time import ensure_utc, seconds_between
+from app.core.time import ensure_utc, now_utc, seconds_between
 from app.courses.models import Course, Enrollment
 from app.courses.permissions import (
     course_role,
@@ -47,6 +47,7 @@ from app.grading.models import (
     Submission,
     SubmissionGrade,
 )
+from app.grading.service import student_status
 from app.notebooks.models import NotebookSession
 from app.users.models import User
 
@@ -79,16 +80,21 @@ class AnalyticsService:
         )
 
     def _assignments(self, course_id: uuid.UUID) -> list[Assignment]:
-        return list(
-            self.db.scalars(
-                select(Assignment)
-                .where(
-                    Assignment.course_id == course_id,
-                    Assignment.is_published.is_(True),
-                )
-                .order_by(Assignment.created_at)
+        """Assignments students can currently see (published, not archived,
+        past their scheduled release). Drafts never skew class analytics."""
+        from app.grading.service import is_visible_to_students
+
+        now = now_utc()
+        rows = self.db.scalars(
+            select(Assignment)
+            .where(
+                Assignment.course_id == course_id,
+                Assignment.is_published.is_(True),
+                Assignment.archived_at.is_(None),
             )
+            .order_by(Assignment.created_at)
         )
+        return [assignment for assignment in rows if is_visible_to_students(assignment, now)]
 
     def _latest_submissions(
         self,
@@ -115,7 +121,9 @@ class AnalyticsService:
         latest: dict[uuid.UUID, SubmissionGrade] = {}
         for grade in self.db.scalars(
             select(SubmissionGrade).where(
-                SubmissionGrade.submission_id.in_(submission_ids)
+                SubmissionGrade.submission_id.in_(submission_ids),
+                # Unreturned drafts are staff-only and must not move averages.
+                SubmissionGrade.released_at.is_not(None),
             )
         ):
             current = latest.get(grade.submission_id)
@@ -165,7 +173,7 @@ class AnalyticsService:
                 StudentAssignmentRow(
                     id=assignment.id,
                     title=assignment.title,
-                    status=submission.status,
+                    status=student_status(submission),
                     final_score=submission.final_score,
                     max_points=assignment.max_points,
                     is_late=submission.is_late,
