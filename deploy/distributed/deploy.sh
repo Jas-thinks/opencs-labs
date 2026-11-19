@@ -460,7 +460,7 @@ rollback_to() {
 
 # One-time: install the GitHub Actions runner on the edge node (registration
 # is a separate step that needs a token from the repository settings).
-RUNNER_VERSION=2.321.0
+RUNNER_VERSION=2.338.2
 cmd_runner_setup() {
   local dir="$BUILD/runner-bin" f="actions-runner-linux-x64-$RUNNER_VERSION.tar.gz"
   mkdir -p "$dir"
