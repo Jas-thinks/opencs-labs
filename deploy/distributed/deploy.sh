@@ -18,6 +18,7 @@
 #   rollback               repoint `current` to the previous release everywhere
 #   monitoring             VictoriaMetrics + vmalert + Grafana + node agents (ADR-011)
 #   logs [who] [svc] [re]  tail or grep service logs across the cluster
+#   config [service ...]   re-render + ship config only, restart services
 #
 # Needs: ~/.ssh/opencs_deploy_ed25519 (authorised on all nodes),
 #        secrets/sudo.env with lines `<alias>=<sudo password>` (gitignored).
@@ -371,6 +372,25 @@ sudo -u postgres psql -q -d opencs -c 'GRANT SELECT ON jobs, notifications TO op
   for a in edge ctl; do r "$a" "nginx -p $ROOT -c $ROOT/env/edge.conf -t -q && kill -HUP \$(cat $ROOT/run/edge.nginx.pid) && echo reloaded"; done
 }
 
+# Config-only change: re-render, ship env + node scripts, restart named
+# services (default: agents + monitoring).  deploy.sh config [service ...]
+cmd_config() {
+  cmd_render
+  _cfg() {
+    r "$1" "mkdir -p $ROOT/env $ROOT/bin && umask 077 && tar -C $ROOT/env -xf -" < <(tar -C "$BUILD/$1" -cf - .)
+    r "$1" "cat > $ROOT/bin/opencs.sh && chmod +x $ROOT/bin/opencs.sh" < "$HERE/node/opencs.sh"
+    r "$1" "cat > $ROOT/bin/agent.py" < "$HERE/node/agent.py"
+    r "$1" "cat > $ROOT/bin/watchdog.sh" < "$HERE/node/watchdog.sh"
+  }
+  each "$(aliases all)" _cfg
+  local services=("$@"); [[ ${#services[@]} -gt 0 ]] || services=(agent vm vmalert)
+  _restart() {
+    local s running; running=$(svc_for "$1")
+    for s in "${services[@]}"; do [[ " $running " == *" $s "* ]] && r "$1" "bash $ROOT/bin/opencs.sh restart $s" | tail -1; done
+  }
+  each "$(aliases all)" _restart
+}
+
 # Search logs across the cluster:  deploy.sh logs <alias|role|all> [service] [grep-pattern]
 cmd_logs() {
   local which=${1:-all} svc=${2:-} pattern=${3:-}
@@ -383,6 +403,6 @@ cmd_logs() {
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
-  render|preflight|cleanup|release|runtimes|postgres|migrate|start|stop|status|verify|rollout|rollback|monitoring|logs) "cmd_$cmd" "$@" ;;
+  render|preflight|cleanup|release|runtimes|postgres|migrate|start|stop|status|verify|rollout|rollback|monitoring|logs|config) "cmd_$cmd" "$@" ;;
   *) sed -n '2,25p' "$0"; exit 64 ;;
 esac

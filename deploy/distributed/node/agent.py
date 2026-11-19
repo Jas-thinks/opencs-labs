@@ -100,15 +100,23 @@ def pressure(path: str) -> dict[str, float]:
 # Incremental log followers (handle truncation/rotation; never re-read a file)
 # --------------------------------------------------------------------------- #
 class Follower:
+    """Follows a log file. The first open starts at the END: history written
+    before the agent started is not replayed as new events (counters start at
+    0, as Prometheus expects). Later rotations are read from the start."""
+
     def __init__(self, path: str) -> None:
         self.path = path
         self.offset = 0
         self.inode = None
+        self.primed = False
 
     def new_lines(self, max_bytes: int = 8 * 1024 * 1024) -> list[str]:
         try:
             stat = os.stat(self.path)
         except OSError:
+            return []
+        if not self.primed:
+            self.primed, self.inode, self.offset = True, stat.st_ino, stat.st_size
             return []
         if self.inode != stat.st_ino or stat.st_size < self.offset:
             # New file or copy-truncate rotation: start from the beginning.
@@ -142,13 +150,8 @@ class ServiceLogs:
             lines = follower.new_lines()
             if name.endswith(".supervisor"):
                 service = name[: -len(".supervisor")]
-                started = sum(1 for line in lines if " started pid=" in line)
-                if started:
-                    # The first start after the agent boots is not a restart.
-                    first = service not in self.restarts
-                    self.restarts[service] = self.restarts.get(service, 0) + started - (1 if first else 0)
-                else:
-                    self.restarts.setdefault(service, 0)
+                restarts = sum(1 for line in lines if " restarting in " in line)
+                self.restarts[service] = self.restarts.get(service, 0) + restarts
             elif not name.startswith("edge."):
                 self.errors[name] = self.errors.get(name, 0) + sum(1 for line in lines if self.ERROR.search(line))
 

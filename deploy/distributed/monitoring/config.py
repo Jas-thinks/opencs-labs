@@ -45,7 +45,7 @@ def scrape_config(inv: dict, token: str) -> str:
             {"job_name": "api", "metrics_path": "/metrics", "static_configs": apis},
             {"job_name": "victoriametrics", "static_configs": [{"targets": [f"{mon['ip']}:8428"]}]},
             {"job_name": "vmalert", "static_configs": [{"targets": ["127.0.0.1:8880"]}]},
-            {"job_name": "grafana", "static_configs": [{"targets": [f"{mon['ip']}:3000"]}]},
+            {"job_name": "grafana", "metrics_path": "/grafana/metrics", "static_configs": [{"targets": [f"{mon['ip']}:3000"]}]},
         ],
     }
     return "# Rendered by render.py\n" + json.dumps(config, indent=2)  # JSON is valid YAML
@@ -76,7 +76,9 @@ def alert_rules(inv: dict) -> str:
         _rule("APIDown", 'up{job="api"} == 0', "1m", "critical", "API {{ $labels.node }} is down"),
         _rule("ServiceDown", "opencs_service_up == 0", "2m", "critical",
               "{{ $labels.service }} on {{ $labels.node }} is not running"),
-        _rule("ServiceFlapping", "increase(opencs_service_restarts_total[15m]) > 3", "0m", "warning",
+        # "x - x offset 15m" instead of increase(): a series that is new (agent
+        # just started) yields nothing rather than a false spike.
+        _rule("ServiceFlapping", "(opencs_service_restarts_total - opencs_service_restarts_total offset 15m) > 3", "0m", "warning",
               "{{ $labels.service }} on {{ $labels.node }} restarted {{ $value }} times in 15 min"),
         _rule("EdgeErrorRateHigh",
               'sum(rate(opencs_edge_requests_total{status_class="5xx"}[5m])) '
@@ -96,7 +98,7 @@ def alert_rules(inv: dict) -> str:
         _rule("MemoryPressure",
               'opencs_cgroup_memory_bytes{type="anon"} / on(node) opencs_cgroup_memory_bytes{type="limit"} > 0.9',
               "5m", "warning", "{{ $labels.node }} uses {{ $value | humanizePercentage }} of its memory limit"),
-        _rule("OOMKill", "increase(opencs_cgroup_oom_kills_total[15m]) > 0", "0m", "critical",
+        _rule("OOMKill", "(opencs_cgroup_oom_kills_total - opencs_cgroup_oom_kills_total offset 15m) > 0", "0m", "critical",
               "A process on {{ $labels.node }} was OOM-killed"),
         _rule("DiskLow", "opencs_disk_free_bytes / opencs_disk_size_bytes < 0.1", "10m", "warning",
               "{{ $labels.node }} has less than 10% disk free"),
@@ -315,10 +317,10 @@ def dashboards() -> dict[str, str]:
     b.ts("CPU throttling", [("rate(opencs_cgroup_cpu_throttled_seconds_total[5m])", "{{node}}")], unit="s")
     b.row("Services")
     b.table("Service status (1 = running)", "opencs_service_up", h=8)
-    b.ts("Restarts (15 min)", [("increase(opencs_service_restarts_total[15m])", "{{node}} {{service}}")])
+    b.ts("Restarts (15 min)", [("opencs_service_restarts_total - opencs_service_restarts_total offset 15m", "{{node}} {{service}}")])
     b.ts("Error log lines / min", [("rate(opencs_log_errors_total[5m]) * 60", "{{node}} {{service}}")])
     b.ts("Disk free", [("opencs_disk_free_bytes", "{{node}}")], unit="bytes", w=12)
-    b.ts("OOM kills", [("increase(opencs_cgroup_oom_kills_total[1h])", "{{node}}")], w=12)
+    b.ts("New OOM kills (1 h)", [("opencs_cgroup_oom_kills_total - opencs_cgroup_oom_kills_total offset 1h", "{{node}}")], w=12)
     boards["overview.json"] = b.json()
 
     b = Board("opencs-edge-api", "OpenCS / Edge & API", "Golden signals at the edge and inside the API.")
