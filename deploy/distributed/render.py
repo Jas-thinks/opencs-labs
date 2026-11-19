@@ -27,12 +27,12 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 BUILD = HERE / "build"
-SECRETS = HERE / "secrets" / "cluster.env"
+SECRETS = Path(os.environ.get("OPENCS_SECRETS_DIR", str(HERE / "secrets"))) / "cluster.env"
 HOME = "/home/student"
 sys.path.insert(0, str(HERE / "monitoring"))
 import config as monitoring  # noqa: E402  (deploy/distributed/monitoring/config.py)
 ROOT = f"{HOME}/opencs"
-KEY = Path.home() / ".ssh" / "opencs_deploy_ed25519"
+KEY = Path(os.environ.get("OPENCS_DEPLOY_KEY", str(Path.home() / ".ssh" / "opencs_deploy_ed25519")))
 
 
 # --------------------------------------------------------------------------- #
@@ -440,7 +440,7 @@ def pg_hba(inv: dict) -> str:
 
 
 def ssh_config(inv: dict) -> str:
-    known = HERE / "build" / "known_hosts"
+    known = Path(os.environ.get("OPENCS_KNOWN_HOSTS", str(HERE / "build" / "known_hosts")))
     out = ["# Rendered: ssh -F deploy/distributed/build/ssh_config <alias>\n"]
     for n in inv["nodes"]:
         out.append(

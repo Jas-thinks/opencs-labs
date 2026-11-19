@@ -19,6 +19,10 @@
 #   monitoring             VictoriaMetrics + vmalert + Grafana + node agents (ADR-011)
 #   logs [who] [svc] [re]  tail or grep service logs across the cluster
 #   config [service ...]   re-render + ship config only, restart services
+#   package                build the release artifact only (CI)
+#   schema                 alembic upgrade head only (no seed)
+#   cd                     full production deploy from OPENCS_ARTIFACTS (CD runner)
+#   runner-setup           install the GitHub Actions runner on the edge node
 #
 # Needs: ~/.ssh/opencs_deploy_ed25519 (authorised on all nodes),
 #        secrets/sudo.env with lines `<alias>=<sudo password>` (gitignored).
@@ -27,9 +31,12 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 BUILD="$HERE/build"
+# Overridable for CI/CD (the runner keeps secrets outside its throwaway checkout).
+SECRETS_DIR="${OPENCS_SECRETS_DIR:-$HERE/secrets}"
+export OPENCS_SECRETS_DIR="$SECRETS_DIR"
 CFG="$BUILD/ssh_config"
 INV="$HERE/inventory.json"
-ART="$BUILD/artifacts"
+ART="${OPENCS_ARTIFACTS:-$BUILD/artifacts}"
 
 say()  { printf '\033[1m==> %s\033[0m\n' "$*"; }
 die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -37,7 +44,7 @@ r()    { ssh -F "$CFG" "$@"; }                        # r <alias> <cmd>
 q()    { python3 -c "import json,sys;inv=json.load(open('$INV'));$1"; }
 aliases() { q "print(' '.join(n['alias'] for n in inv['nodes'] if '$1' in ('all',n['role'],n['alias'])))"; }
 ip_of()   { q "print(next(n['ip'] for n in inv['nodes'] if n['alias']=='$1'))"; }
-sudo_pw() { grep "^$1=" "$HERE/secrets/sudo.env" | cut -d= -f2-; }
+sudo_pw() { grep "^$1=" "$SECRETS_DIR/sudo.env" | cut -d= -f2-; }
 rsudo()   { local a=$1; shift; r "$a" "sudo -S -p '' bash -c $(printf '%q' "$*")" <<<"$(sudo_pw "$a")"; }
 each()    { local pids=() a; for a in $1; do ( "$2" "$a" 2>&1 | sed "s/^/[$a] /" ) & pids+=($!); done
             local rc=0; for p in "${pids[@]}"; do wait "$p" || rc=1; done; return $rc; }
@@ -61,7 +68,7 @@ cmd_preflight() {
 # opencs-*, the old svc.sh supervisors, the stray PostgreSQL on the control
 # node). Nothing else on these shared containers is touched.
 cmd_cleanup() {
-  local dumps="$HERE/secrets/pre-deploy-dumps"; mkdir -p "$dumps"
+  local dumps="$SECRETS_DIR/pre-deploy-dumps"; mkdir -p "$dumps"
   say "dumping pre-existing opencs databases to $dumps"
   for a in pg1 pg2 ctl; do
     if rsudo "$a" "sudo -u postgres pg_dump -Fc opencs" > "$dumps/$a-opencs.dump" 2>/dev/null && [[ -s "$dumps/$a-opencs.dump" ]]; then
@@ -100,7 +107,10 @@ build_artifacts() {
   tar -C "$REPO/frontend/dist" -czf "$ART/frontend.tgz" .
 
   say "datasets"
-  [[ -d "$REPO/datasets/serving" ]] || "$REPO/backend/.venv/bin/python" "$REPO/scripts/fetch_datasets.py"
+  # A dataset whose source is unreachable is skipped (the seed leaves it out
+  # of the catalogue); the rest still ship.
+  [[ -d "$REPO/datasets/serving" ]] || "${PYTHON_BIN:-$REPO/backend/.venv/bin/python}" "$REPO/scripts/fetch_datasets.py" \
+    || say "warning: some datasets could not be fetched"
   git -C "$REPO" checkout -- datasets/manifests 2>/dev/null || true   # drop timestamp-only churn
   tar -C "$REPO/datasets" -czf "$ART/datasets.tgz" serving
 
@@ -122,7 +132,7 @@ ship() {  # alias: code + scripts + env + role artifacts, then flip `current`
   r "$a" "umask 077; tar -C $ROOT/env -xf -" < <(tar -C "$BUILD/$a" -cf - .)
   r "$a" "cat > $ROOT/bin/agent.py" < "$HERE/node/agent.py"
   case "$role" in
-    edge|control) r "$a" "rm -rf $ROOT/frontend.new && mkdir $ROOT/frontend.new && tar xzf - -C $ROOT/frontend.new && rm -rf $ROOT/frontend.old && { [ -d $ROOT/frontend ] && mv $ROOT/frontend $ROOT/frontend.old || true; } && mv $ROOT/frontend.new $ROOT/frontend" < "$ART/frontend.tgz" ;;
+    edge|control) r "$a" "d=$ROOT/releases/$sha/frontend-dist; [ -d \$d ] || { mkdir -p \$d.tmp && tar xzf - -C \$d.tmp && mv \$d.tmp \$d; }; [ -L $ROOT/frontend ] || rm -rf $ROOT/frontend; ln -sfn current/frontend-dist $ROOT/frontend" < "$ART/frontend.tgz" ;;
   esac
   case "$role" in
     api|control|hub) r "$a" "mkdir -p $ROOT/datasets && tar xzf - -C $ROOT/datasets" < "$ART/datasets.tgz" ;;
@@ -203,7 +213,7 @@ cmd_postgres() {
   done
 
   say "primary (pg1): restart with new config, roles, fresh opencs database"
-  local dbpw replpw; dbpw=$(grep ^DB_PASSWORD= "$HERE/secrets/cluster.env" | cut -d= -f2); replpw=$(grep ^REPL_PASSWORD= "$HERE/secrets/cluster.env" | cut -d= -f2)
+  local dbpw replpw; dbpw=$(grep ^DB_PASSWORD= "$SECRETS_DIR/cluster.env" | cut -d= -f2); replpw=$(grep ^REPL_PASSWORD= "$SECRETS_DIR/cluster.env" | cut -d= -f2)
   rsudo pg1 "pg_ctlcluster 16 main restart && sleep 2 && sudo -u postgres psql -v ON_ERROR_STOP=1 -q <<SQL
 DO \\\$\\\$BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='opencs') THEN CREATE ROLE opencs LOGIN; END IF;
@@ -302,6 +312,13 @@ cmd_verify() {
 
 cmd_rollout() {
   cmd_release
+  rolling_restart
+}
+
+# Restart onto the shipped release without dropping a request: one API at a
+# time (the edge retries on the others), then the worker, hubs (idempotent),
+# and a graceful edge reload. Fails fast if an API does not come back healthy.
+rolling_restart() {
   say "rolling restart: one API at a time, edge keeps serving from the others"
   local a; for a in $(aliases api); do
     r "$a" "bash $ROOT/bin/opencs.sh restart api && for i in \$(seq 60); do curl -fsS -o /dev/null http://127.0.0.1:8000/health && { for w in 1 2 3; do curl -s -o /dev/null http://127.0.0.1:8000/api/v1/me; done; echo healthy+warm; exit 0; }; sleep 1; done; exit 1"
@@ -350,7 +367,7 @@ cmd_monitoring() {
   r "$MON" "ls $ROOT/monitoring; $ROOT/monitoring/victoria-metrics-prod -version"
 
   say "read-only PostgreSQL role for the node agents"
-  local monpw; monpw=$(grep ^PG_MONITOR_PASSWORD= "$HERE/secrets/cluster.env" | cut -d= -f2)
+  local monpw; monpw=$(grep ^PG_MONITOR_PASSWORD= "$SECRETS_DIR/cluster.env" | cut -d= -f2)
   rsudo pg1 "sudo -u postgres psql -v ON_ERROR_STOP=1 -q <<SQL
 DO \\\$\\\$BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='opencs_monitor') THEN CREATE ROLE opencs_monitor LOGIN; END IF;
@@ -391,6 +408,86 @@ cmd_config() {
   each "$(aliases all)" _restart
 }
 
+# --------------------------------------------------------------------------- #
+# CI/CD (ADR-011)
+# --------------------------------------------------------------------------- #
+# Build the release artifact only (GitHub-hosted CI runs this).
+cmd_package() { build_artifacts; }
+
+# Schema migrations only (never the demo seed). Additive migrations keep old
+# and new code valid on the same schema, so this runs before the restart.
+cmd_schema() {
+  r ctl "cd $ROOT/current/backend && set -a && . $ROOT/env/worker.env && set +a && $ROOT/venv/bin/alembic upgrade head 2>&1 | tail -3"
+}
+
+# The production deploy, run by the self-hosted runner on the edge node with a
+# CI-built artifact:  OPENCS_ARTIFACTS=<dir> deploy.sh cd
+cmd_cd() {
+  [[ -f "$ART/SHA" ]] || die "no artifact in $ART"
+  local prev; prev=$(r edge "basename \$(readlink $ROOT/current)")
+  say "deploying release $(cat "$ART/SHA") (running: $prev)"
+  # Steps run in a child process: `set -e` is ignored inside an `if`, so the
+  # child is what makes any failing command abort the deploy.
+  if ! "$0" cd-steps; then
+    say "DEPLOY FAILED - rolling every node back to $prev"
+    rollback_to "$prev"
+    cmd_verify || true
+    die "deploy failed and was rolled back to $prev"
+  fi
+}
+
+cmd_cd_steps() {
+  SKIP_BUILD=1 cmd_release
+  say "schema migrations"
+  cmd_schema
+  rolling_restart
+  say "verification"
+  cmd_verify
+}
+
+# Point every node at an exact release (code and frontend move together) and
+# restart without dropping requests.
+rollback_to() {
+  local sha=$1
+  _to() { r "$1" "cd $ROOT && [ -d releases/$sha ] && ln -sfn releases/$sha current && echo current=$sha"; }
+  each "$(aliases all)" _to
+  rolling_restart
+}
+
+# One-time: install the GitHub Actions runner on the edge node (registration
+# is a separate step that needs a token from the repository settings).
+RUNNER_VERSION=2.321.0
+cmd_runner_setup() {
+  local dir="$BUILD/runner-bin" f="actions-runner-linux-x64-$RUNNER_VERSION.tar.gz"
+  mkdir -p "$dir"
+  [[ -f "$dir/$f" ]] || curl -fsSL --retry 3 -o "$dir/$f" "https://github.com/actions/runner/releases/download/v$RUNNER_VERSION/$f"
+  # The release notes carry the official SHA-256 for each package.
+  local want; want=$(curl -fsSL --retry 3 "https://api.github.com/repos/actions/runner/releases/tags/v$RUNNER_VERSION" \
+    | python3 -c "import json,re,sys; b=json.load(sys.stdin)['body']; print(re.search(r'BEGIN SHA linux-x64 -->\\s*([0-9a-f]{64})', b).group(1))")
+  echo "$want  $f" | (cd "$dir" && sha256sum -c -) || die "runner checksum mismatch"
+
+  say "runner on the edge node"
+  r edge "mkdir -p ~/actions-runner && cd ~/actions-runner && [ -x run.sh ] || tar xzf -" < "$dir/$f"
+  # The runner gets its own SSH key (authorised on every node) and the cluster
+  # secrets, kept outside the job checkout; no secret lives in GitHub.
+  local pub; pub=$(r edge 'k=~/.ssh/opencs_runner_ed25519; [ -f $k ] || ssh-keygen -q -t ed25519 -N "" -C opencs-runner -f $k; cat $k.pub')
+  _auth_runner() { r "$1" "umask 077; mkdir -p ~/.ssh; grep -qxF '$pub' ~/.ssh/authorized_keys 2>/dev/null || echo '$pub' >> ~/.ssh/authorized_keys"; }
+  each "$(aliases all)" _auth_runner
+  r edge "umask 077; mkdir -p ~/.opencs-deploy && cat > ~/.opencs-deploy/cluster.env" < "$SECRETS_DIR/cluster.env"
+  r edge "umask 077; cat > ~/.opencs-deploy/known_hosts" < "$BUILD/known_hosts"
+  r edge "cat > ~/actions-runner/register-opencs.sh && chmod +x ~/actions-runner/register-opencs.sh" <<'REG'
+#!/usr/bin/env bash
+# Usage: ~/actions-runner/register-opencs.sh <registration-token>
+# Token: GitHub repo -> Settings -> Actions -> Runners -> New self-hosted runner.
+set -euo pipefail
+cd ~/actions-runner
+./config.sh --unattended --replace --url https://github.com/Jas-thinks/opencs-labs \
+  --token "$1" --name opencs-edge --labels opencs-edge --work _work
+bash ~/opencs/bin/opencs.sh start runner
+REG
+  r edge "ls ~/actions-runner | head -5; echo runner installed - register with: ~/actions-runner/register-opencs.sh TOKEN"
+}
+
 # Search logs across the cluster:  deploy.sh logs <alias|role|all> [service] [grep-pattern]
 cmd_logs() {
   local which=${1:-all} svc=${2:-} pattern=${3:-}
@@ -403,6 +500,6 @@ cmd_logs() {
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
-  render|preflight|cleanup|release|runtimes|postgres|migrate|start|stop|status|verify|rollout|rollback|monitoring|logs|config) "cmd_$cmd" "$@" ;;
+  render|preflight|cleanup|release|runtimes|postgres|migrate|start|stop|status|verify|rollout|rollback|monitoring|logs|config|package|schema|cd|cd-steps|runner-setup) "cmd_${cmd//-/_}" "$@" ;;
   *) sed -n '2,25p' "$0"; exit 64 ;;
 esac

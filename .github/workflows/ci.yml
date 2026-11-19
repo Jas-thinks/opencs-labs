@@ -1,9 +1,20 @@
 name: CI
 
+# Runs on every pull request and every push to main. On main, a green run also
+# packages the release artifact that the Deploy workflow rolls out (ADR-011).
+
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   backend:
@@ -83,9 +94,12 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install validators
-        run: pip install PyYAML pandas pyarrow openpyxl
+        run: pip install -r backend/requirements.txt PyYAML pandas pyarrow openpyxl
       - name: Validate curriculum and exercises
         run: python scripts/validate_content.py
+      # The serving tree is built, not committed: build it, then verify it.
+      - name: Build the dataset library
+        run: python scripts/fetch_datasets.py
       - name: Verify dataset manifests against serving files
         run: python scripts/sync_datasets.py --skip-upload
 
@@ -198,3 +212,115 @@ jobs:
             exit 1
           fi
           echo "contract holds: no kernel execution in the extension"
+
+  # Migrations against the production engine (the unit tests use SQLite).
+  migrations-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: opencs
+          POSTGRES_PASSWORD: opencs
+          POSTGRES_DB: opencs
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U opencs" --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      OPENCE_DATABASE_URL: postgresql+psycopg://opencs:opencs@127.0.0.1:5432/opencs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Upgrade to head
+        run: alembic upgrade head
+      - name: Downgrade and re-upgrade the latest two revisions
+        run: |
+          alembic downgrade -2
+          alembic upgrade head
+      - name: Models and migrations agree
+        run: |
+          python - <<'PY'
+          from sqlalchemy import create_engine, inspect
+          import os
+          import app.db.registry  # noqa: F401  (registers every model)
+          from app.db.base import Base
+          inspector = inspect(create_engine(os.environ["OPENCE_DATABASE_URL"]))
+          missing = []
+          for table in Base.metadata.sorted_tables:
+              if not inspector.has_table(table.name):
+                  missing.append(table.name); continue
+              columns = {c["name"] for c in inspector.get_columns(table.name)}
+              missing += [f"{table.name}.{c.name}" for c in table.columns if c.name not in columns]
+          if missing:
+              raise SystemExit(f"model columns missing from migrated schema: {missing}")
+          print("schema matches models")
+          PY
+
+  # The 12-node deployment tooling: syntax, lint and a full config render.
+  deploy-tooling:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shellcheck
+        run: shellcheck -S warning deploy/distributed/deploy.sh deploy/distributed/node/*.sh
+      - name: Python compiles
+        run: python3 -m py_compile deploy/distributed/render.py deploy/distributed/node/agent.py deploy/distributed/monitoring/config.py
+      - name: Render every node's configuration (throwaway secrets)
+        env:
+          OPENCS_SECRETS_DIR: ${{ runner.temp }}/secrets
+        run: |
+          python3 deploy/distributed/render.py
+          python3 - <<'PY'
+          import json, pathlib
+          build = pathlib.Path("deploy/distributed/build")
+          for path in list(build.glob("*/dashboards/*.json")) + list(build.glob("*/*.yml")) + list(build.glob("*/grafana-provisioning/*/*.yaml")):
+              text = path.read_text()
+              json.loads(text.split("\n", 1)[1] if text.startswith("#") else text)
+          print("dashboards, scrape config, alert rules and provisioning are valid")
+          PY
+      - name: nginx accepts the rendered edge config
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq nginx-core >/dev/null
+          root=$(mktemp -d); mkdir -p "$root"/{env,run,logs,tmp/client,tmp/proxy,tmp/fastcgi,tmp/uwsgi,tmp/scgi,frontend}
+          sed "s#/home/student/opencs#$root#g" deploy/distributed/build/edge/edge.conf > "$root/env/edge.conf"
+          for f in api-proxy.inc nb-proxy.inc; do cp deploy/distributed/build/edge/$f "$root/env/"; done
+          nginx -p "$root" -c "$root/env/edge.conf" -t
+
+  # Release artifact for the Deploy workflow (main only, after every check).
+  package:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [backend, content, frontend, manifests, notebook-image, jupyterlab-extension, migrations-postgres, deploy-tooling]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build tools
+        run: |
+          python -m venv "$RUNNER_TEMP/jlab"
+          "$RUNNER_TEMP/jlab/bin/pip" install -q "jupyterlab==4.6.6" -r backend/requirements.txt
+      - name: Package release
+        env:
+          JLAB_VENV: ${{ runner.temp }}/jlab
+          PYTHON_BIN: ${{ runner.temp }}/jlab/bin/python
+          OPENCS_ARTIFACTS: ${{ runner.temp }}/release
+        run: deploy/distributed/deploy.sh package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: ${{ runner.temp }}/release
+          retention-days: 30
+          if-no-files-found: error

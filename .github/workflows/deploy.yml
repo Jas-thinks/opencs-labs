@@ -1,360 +1,107 @@
 name: Deploy
 
-# Deployment pipeline for the native (no-Docker) 4-container stack.
+# Production deploy to the 12-node cluster (ADR-011).
 #
-# DESIGN NOTES
-# ------------
-# * Triggers on manual dispatch and on a successful CI run on main. It does NOT
-#   deploy on every push: production requires an explicit decision.
-# * The `production` GitHub Environment gates the deploy job. Configure required
-#   reviewers on that environment so a run cannot reach production unreviewed.
-# * Credentials live only in GitHub Actions secrets. Nothing here contains a
-#   password, key or host-specific secret. See docs/deployment/CICD.md for the
-#   exact secret names and how to create them.
-# * Database migrations run ONCE (on backend 1), never on all three.
-# * Rollout is one backend at a time so the load balancer always keeps healthy
-#   peers. Health is verified after each step and the rollout stops on failure.
-# * Rollback re-deploys the previous commit. Migrations are NOT auto-reversed.
-# * Nothing is claimed to work until the post-deploy verification passes.
+# * GitHub's cloud runners cannot reach the 10.1.75.x network, so the build
+#   happens in CI (the `release` artifact) and this job runs on a self-hosted
+#   runner on the edge node (label `opencs-edge`) inside the network.
+# * It deploys exactly the artifact CI tested and packaged for that commit.
+# * The `production` environment gates it: configure required reviewers in
+#   Settings -> Environments -> production, so nothing ships unapproved.
+# * Cluster secrets stay on the runner host (~/.opencs-deploy); no password or
+#   key is stored in GitHub.
+# * Order: ship release -> additive schema migrations -> rolling restart (one
+#   API at a time; the edge keeps serving) -> verification. Any failure rolls
+#   back to the previous release. Migrations are additive, so the previous code
+#   runs on the new schema; they are never auto-reversed.
 
 on:
-  workflow_dispatch:
-    inputs:
-      ref:
-        description: "Commit SHA or branch to deploy"
-        required: true
-        default: main
-      skip_migrations:
-        description: "Skip database migrations (code-only deploy)"
-        type: boolean
-        default: false
   workflow_run:
-    workflows: ["CI"]
+    workflows: [CI]
     types: [completed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: "CI run id whose `release` artifact to deploy (blank = latest successful run on main)"
+        required: false
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: deploy-production
   cancel-in-progress: false
 
-env:
-  PYTHON_VERSION: "3.12"
-  NODE_VERSION: "22"
-
 jobs:
-  # ---------------------------------------------------------------------------
-  # Gate: only deploy code that passed CI, and never on a failed run.
-  # ---------------------------------------------------------------------------
-  preflight:
-    name: Preflight
-    runs-on: ubuntu-latest
-    outputs:
-      ref: ${{ steps.ref.outputs.value }}
-      deploy: ${{ steps.gate.outputs.deploy }}
-    steps:
-      - name: Decide whether to deploy
-        id: gate
-        run: |
-          # A workflow_run that failed must not proceed to deployment.
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            if [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
-              echo "CI conclusion was '${{ github.event.workflow_run.conclusion }}'; skipping deploy."
-              echo "deploy=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          fi
-          echo "deploy=true" >> "$GITHUB_OUTPUT"
-
-      - name: Resolve target ref
-        id: ref
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            echo "value=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "value=${{ inputs.ref }}" >> "$GITHUB_OUTPUT"
-          fi
-
-  # ---------------------------------------------------------------------------
-  # Build the frontend once; every backend must serve the same bundle.
-  # ---------------------------------------------------------------------------
-  build-frontend:
-    name: Build frontend
-    needs: preflight
-    if: needs.preflight.outputs.deploy == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.preflight.outputs.ref }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install
-        working-directory: frontend
-        run: npm ci --include=dev --no-audit --no-fund
-
-      - name: Build
-        working-directory: frontend
-        env:
-          # Same-origin API: nginx proxies /api/ to the backends.
-          VITE_API_BASE: /api/v1
-          VITE_NOTEBOOK_ORIGIN: ""
-        run: npm run build
-
-      - name: Verify the bundle has no localhost API base
-        working-directory: frontend
-        run: |
-          if grep -rq "localhost:8000" dist/ 2>/dev/null; then
-            echo "ERROR: development API base leaked into the production bundle" >&2
-            exit 1
-          fi
-          echo "bundle is clean"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: frontend-dist
-          path: frontend/dist
-          retention-days: 7
-
-  # ---------------------------------------------------------------------------
-  # Deploy. Gated by the `production` environment (required reviewers).
-  # ---------------------------------------------------------------------------
   deploy:
-    name: Deploy to production
-    needs: [preflight, build-frontend]
-    if: needs.preflight.outputs.deploy == 'true'
-    runs-on: ubuntu-latest
+    name: Deploy to the cluster
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: [self-hosted, opencs-edge]
     environment:
       name: production
-      url: ${{ vars.PROD_URL }}
+      url: http://10.1.75.53:5305
+    timeout-minutes: 30
     env:
-      DEPLOY_REF: ${{ needs.preflight.outputs.ref }}
-      SKIP_MIGRATIONS: ${{ inputs.skip_migrations || 'false' }}
+      OPENCS_ARTIFACTS: ${{ github.workspace }}/release
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.preflight.outputs.ref }}
-          fetch-depth: 0
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist
-          path: frontend/dist
-
-      - name: Install SSH key
+      - name: Resolve the CI run to deploy
+        id: run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          INPUT_RUN: ${{ inputs.ci_run_id }}
+          EVENT_RUN: ${{ github.event.workflow_run.id }}
+          EVENT_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          # Pin the host key rather than trusting on first use.
-          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-          cat > ~/.ssh/config <<EOF
-          Host opencs-be1 opencs-be2 opencs-be3 opencs-lb
-            User ${{ secrets.DEPLOY_USER }}
-            IdentityFile ~/.ssh/id_deploy
-            StrictHostKeyChecking yes
-            UserKnownHostsFile ~/.ssh/known_hosts
-          Host opencs-lb
-            HostName ${{ secrets.LB_HOST }}
-            Port ${{ secrets.LB_PORT }}
-          Host opencs-be1
-            HostName ${{ secrets.BE1_HOST }}
-            Port ${{ secrets.BE1_PORT }}
-          Host opencs-be2
-            HostName ${{ secrets.BE2_HOST }}
-            Port ${{ secrets.BE2_PORT }}
-          Host opencs-be3
-            HostName ${{ secrets.BE3_HOST }}
-            Port ${{ secrets.BE3_PORT }}
-          EOF
-          chmod 600 ~/.ssh/config
-
-      - name: Verify SSH reachability
-        run: |
-          for h in opencs-be1 opencs-be2 opencs-be3 opencs-lb; do
-            echo "== $h =="
-            ssh -o BatchMode=yes -o ConnectTimeout=10 "$h" 'hostname' \
-              || { echo "ERROR: cannot reach $h" >&2; exit 1; }
-          done
-
-      - name: Deploy frontend to the load balancer
-        run: |
-          tar czf /tmp/frontend.tgz -C frontend/dist .
-          scp /tmp/frontend.tgz opencs-lb:/tmp/frontend.tgz
-          ssh opencs-lb 'sudo -n /usr/local/bin/opencs-deploy-frontend /tmp/frontend.tgz'
-
-      - name: Run migrations (once, backend 1 only)
-        if: env.SKIP_MIGRATIONS != 'true'
-        run: |
-          # DEPLOY_REF is passed as an argument, not interpolated into the
-          # quoted heredoc, so the remote shell receives it as data.
-          ssh opencs-be1 "DEPLOY_REF='$DEPLOY_REF' /bin/bash -s" <<'REMOTE'
           set -euo pipefail
-          cd ~/opencs-labs
-          git fetch --quiet origin
-          git checkout --quiet "$DEPLOY_REF"
-          cd backend
-          set -a; . ~/opencs-runtime/.env; set +a
-          ~/opencs-runtime/venv/bin/alembic upgrade head
-          ~/opencs-runtime/venv/bin/alembic current
-          REMOTE
-
-      - name: Roll out backends one at a time
-        run: |
-          # One at a time so the load balancer always has two healthy peers.
-          for h in opencs-be1 opencs-be2 opencs-be3; do
-            echo "===== deploying $h ====="
-            ssh "$h" "DEPLOY_REF='$DEPLOY_REF' /bin/bash -s" <<'REMOTE'
-          set -euo pipefail
-          cd ~/opencs-labs
-
-          # Remember what was running, for the rollback job.
-          ~/opencs-runtime/record_previous_sha.sh || true
-
-          git fetch --quiet origin
-          git checkout --quiet "$DEPLOY_REF"
-          ~/opencs-runtime/svc.sh restart backend
-
-          # Wait for this instance to answer /ready (DB-backed) before moving on.
-          for i in $(seq 1 30); do
-            if curl -fsS -m 5 http://127.0.0.1:8000/ready >/dev/null 2>&1; then
-              echo "ready after ${i}s"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "ERROR: $h did not become ready" >&2
-          tail -30 ~/opencs-runtime/logs/backend.log >&2 || true
-          exit 1
-          REMOTE
-          done
-
-      - name: Post-deploy verification
-        run: |
-          ssh opencs-lb '/bin/bash -s' <<'REMOTE'
-          set -uo pipefail
-          fail=0
-          check() {
-            local label=$1 url=$2 want=$3
-            got=$(curl -sS -m 10 -o /dev/null -w '%{http_code}' "$url" || echo 000)
-            if [ "$got" = "$want" ]; then
-              echo "PASS $label ($got)"
-            else
-              echo "FAIL $label (got $got, want $want)"
-              fail=$((fail+1))
-            fi
-          }
-          check "proxy healthz"   http://127.0.0.1/healthz            200
-          check "backend health"  http://127.0.0.1/health             200
-          check "backend ready"   http://127.0.0.1/ready              200
-          check "api config"      http://127.0.0.1/api/v1/config      200
-          check "frontend"        http://127.0.0.1/                   200
-          check "unauthenticated" http://127.0.0.1/api/v1/me          401
-
-          # Smoke test: a real login proves the API can reach PostgreSQL.
-          code=$(curl -sS -m 10 -o /dev/null -w '%{http_code}' \
-            -X POST http://127.0.0.1/api/v1/auth/login \
-            -H 'Content-Type: application/json' \
-            -d '{"email":"student@opencs.local","password":"opencs-demo"}' || echo 000)
-          if [ "$code" = "200" ]; then echo "PASS smoke login ($code)";
-          else echo "FAIL smoke login (got $code)"; fail=$((fail+1)); fi
-
-          exit "$fail"
-          REMOTE
-
-      - name: Report deployed revision
-        if: always()
-        run: |
-          echo "### Deployment result" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Ref: \`$DEPLOY_REF\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Status: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
-          for h in opencs-be1 opencs-be2 opencs-be3; do
-            sha=$(ssh -o BatchMode=yes "$h" 'cd ~/opencs-labs && git rev-parse --short HEAD' 2>/dev/null || echo unknown)
-            echo "- $h: \`$sha\`" >> "$GITHUB_STEP_SUMMARY"
-          done
-
-  # ---------------------------------------------------------------------------
-  # Rollback: re-deploy the previous commit if the deploy or verification failed.
-  # ---------------------------------------------------------------------------
-  rollback:
-    name: Rollback
-    needs: [preflight, deploy]
-    if: failure() && needs.preflight.outputs.deploy == 'true'
-    runs-on: ubuntu-latest
-    environment:
-      name: production
-    steps:
-      - name: Install SSH key
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-          cat > ~/.ssh/config <<EOF
-          Host opencs-be1 opencs-be2 opencs-be3 opencs-lb
-            User ${{ secrets.DEPLOY_USER }}
-            IdentityFile ~/.ssh/id_deploy
-            StrictHostKeyChecking yes
-            UserKnownHostsFile ~/.ssh/known_hosts
-          Host opencs-lb
-            HostName ${{ secrets.LB_HOST }}
-            Port ${{ secrets.LB_PORT }}
-          Host opencs-be1
-            HostName ${{ secrets.BE1_HOST }}
-            Port ${{ secrets.BE1_PORT }}
-          Host opencs-be2
-            HostName ${{ secrets.BE2_HOST }}
-            Port ${{ secrets.BE2_PORT }}
-          Host opencs-be3
-            HostName ${{ secrets.BE3_HOST }}
-            Port ${{ secrets.BE3_PORT }}
-          EOF
-          chmod 600 ~/.ssh/config
-
-      - name: Restore the previous known-good commit
-        run: |
-          # Each backend records the sha it was running before the deploy.
-          for h in opencs-be1 opencs-be2 opencs-be3; do
-            echo "===== rolling back $h ====="
-            ssh "$h" "/bin/bash -s" <<'REMOTE'
-          set -uo pipefail
-          cd ~/opencs-labs
-          prev=$(cat ~/opencs-runtime/previous-sha 2>/dev/null || echo "")
-          if [ -z "$prev" ]; then
-            echo "no previous-sha recorded on this host; leaving as-is" >&2
-            exit 0
+          if [ -n "${EVENT_RUN:-}" ]; then
+            echo "id=$EVENT_RUN" >> "$GITHUB_OUTPUT"; echo "sha=$EVENT_SHA" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          git fetch --quiet origin || true
-          git checkout --quiet "$prev" || { echo "cannot checkout $prev" >&2; exit 1; }
-          ~/opencs-runtime/svc.sh restart backend
-          for i in $(seq 1 20); do
-            curl -fsS -m 5 http://127.0.0.1:8000/health >/dev/null 2>&1 && exit 0
-            sleep 2
-          done
-          echo "rollback target $prev did not become healthy" >&2
-          exit 1
-          REMOTE
-          done
-          echo "NOTE: database migrations were NOT reversed. Restore from a dump if required."
+          api() { curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/$1"; }
+          if [ -n "${INPUT_RUN:-}" ]; then
+            api "actions/runs/$INPUT_RUN" > run.json
+          else
+            api "actions/workflows/ci.yml/runs?branch=main&status=success&event=push&per_page=1" \
+              | python3 -c "import json,sys; json.dump(json.load(sys.stdin)['workflow_runs'][0], open('run.json','w'))"
+          fi
+          python3 - >> "$GITHUB_OUTPUT" <<'PY'
+          import json
+          run = json.load(open("run.json"))
+          assert run["conclusion"] == "success", "that CI run did not succeed"
+          print(f"id={run['id']}"); print(f"sha={run['head_sha']}")
+          PY
 
-      - name: Verify recovery
+      - name: Check out the deployed commit (deploy scripts)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.run.outputs.sha }}
+
+      - name: Download the release artifact built by CI
+        uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+          run-id: ${{ steps.run.outputs.id }}
+          github-token: ${{ github.token }}
+
+      - name: Use the runner host's cluster credentials
         run: |
-          ssh opencs-lb 'curl -fsS -m 10 http://127.0.0.1/health && echo " <- recovered"'
+          set -euo pipefail
+          test -f "$HOME/.opencs-deploy/cluster.env" || { echo "run deploy.sh runner-setup first" >&2; exit 1; }
+          echo "OPENCS_SECRETS_DIR=$HOME/.opencs-deploy" >> "$GITHUB_ENV"
+          echo "OPENCS_DEPLOY_KEY=$HOME/.ssh/opencs_runner_ed25519" >> "$GITHUB_ENV"
+          echo "OPENCS_KNOWN_HOSTS=$HOME/.opencs-deploy/known_hosts" >> "$GITHUB_ENV"
+          test "$(cat release/SHA)" = "$(git rev-parse --short=12 HEAD)" || { echo "artifact/commit mismatch" >&2; exit 1; }
 
-      - name: Record rollback in the summary
+      # On any failure after shipping, `deploy.sh cd` itself rolls every node
+      # back to the exact release that was running before (code + frontend).
+      - name: Deploy (ship, migrate, rolling restart, verify; auto-rollback)
+        run: deploy/distributed/deploy.sh cd
+
+      - name: Cluster status
         if: always()
-        run: |
-          echo "### Rollback" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Deployment failed; previous release restored per-container." >> "$GITHUB_STEP_SUMMARY"
-          echo "Database migrations were intentionally **not** reversed." >> "$GITHUB_STEP_SUMMARY"
+        run: deploy/distributed/deploy.sh status

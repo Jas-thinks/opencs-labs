@@ -86,6 +86,11 @@ EOF
     grafana)
       echo "exec '$ROOT/monitoring/grafana/bin/grafana' server --homepath '$ROOT/monitoring/grafana' --config '$ROOT/env/grafana.ini'"
       ;;
+    runner)
+      # GitHub Actions self-hosted runner (edge node only; ADR-011). Started
+      # by ~/actions-runner/register-opencs.sh once it is registered.
+      echo "cd \"\$HOME/actions-runner\" && exec ./run.sh"
+      ;;
     *) return 1 ;;
   esac
 }
