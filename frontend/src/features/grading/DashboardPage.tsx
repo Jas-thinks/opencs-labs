@@ -26,90 +26,18 @@ function statusTone(status: string): "green" | "amber" | "neutral" | "red" {
   return "neutral";
 }
 
-function SubmitWork({ courseId }: { courseId: string }) {
-  const assignments = useAsync(() => api.assignments(courseId), [courseId]);
-  const notebooks = useAsync(() => api.notebooks(), []);
-  const [assignmentId, setAssignmentId] = useState("");
-  const [notebookId, setNotebookId] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<Error | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function submit() {
-    if (!assignmentId || !notebookId) {
-      setError(new Error("Choose an assignment and a notebook first."));
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const submission = await api.submitAssignment(assignmentId, notebookId);
-      setMessage(
-        `Submitted attempt ${submission.attempt_number}${submission.is_late ? " (late)" : ""}.`,
-      );
-    } catch (cause) {
-      setError(cause instanceof Error ? cause : new Error(String(cause)));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (!assignments.data || assignments.data.assignments.length === 0) return null;
-
-  return (
-    <section className="card stack">
-      <div>
-        <h2 style={{ fontSize: 16, marginBottom: 4 }}>Submit work</h2>
-        <p className="small dim" style={{ margin: 0 }}>
-          A submission snapshots the current notebook immutably. You can resubmit until the due
-          date.
-        </p>
-      </div>
-      <div className="grid grid-2">
-        <label className="field">
-          <span className="label">Assignment</span>
-          <select className="select" value={assignmentId} onChange={(e) => setAssignmentId(e.target.value)}>
-            <option value="">Select an assignment…</option>
-            {assignments.data.assignments.map((assignment) => (
-              <option key={assignment.id} value={assignment.id}>
-                {assignment.title}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span className="label">Notebook</span>
-          <select className="select" value={notebookId} onChange={(e) => setNotebookId(e.target.value)}>
-            <option value="">Select a notebook…</option>
-            {(notebooks.data?.notebooks ?? []).map((notebook) => (
-              <option key={notebook.id} value={notebook.id}>
-                {notebook.title}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      <div className="row">
-        <button className="btn btn-primary" type="button" onClick={submit} disabled={busy}>
-          {busy ? "Submitting…" : "Submit notebook"}
-        </button>
-        {message && <Badge tone="green">{message}</Badge>}
-      </div>
-      {error && <ErrorBox error={error} />}
-    </section>
-  );
-}
-
 export function DashboardPage() {
   const courses = useAsync(() => api.courses(), []);
   const [courseId, setCourseId] = useState("");
 
+  // Progress is a student view: only classes where I am a student.
+  const studentCourses = (courses.data?.courses ?? []).filter((c) => c.role_in_course === "student");
+
   useEffect(() => {
-    if (!courseId && courses.data?.courses.length) {
-      setCourseId(courses.data.courses[0].id);
+    if (!courseId && studentCourses.length) {
+      setCourseId(studentCourses[0].id);
     }
-  }, [courseId, courses.data]);
+  }, [courseId, studentCourses]);
 
   const dashboard = useAsync(
     () => api.myDashboard(courseId || undefined),
@@ -120,14 +48,14 @@ export function DashboardPage() {
   if (courses.loading) return <Loading label="Loading your courses…" />;
   if (courses.error) return <ErrorBox error={courses.error} retry={courses.reload} />;
 
-  const course = courses.data?.courses.find((item) => item.id === courseId);
+  const course = studentCourses.find((item) => item.id === courseId);
   const data: StudentDashboard | null = dashboard.data;
 
   return (
     <div className="stack" style={{ gap: 22 }}>
       <header className="page-head" style={{ marginBottom: 0 }}>
         <div style={{ maxWidth: 680 }}>
-          <h1>Dashboard</h1>
+          <h1>My progress</h1>
           <p className="lead" style={{ marginBottom: 0 }}>
             Your completion, scores, rubric mastery and time on task for a course.
           </p>
@@ -138,7 +66,7 @@ export function DashboardPage() {
           value={courseId}
           onChange={(event) => setCourseId(event.target.value)}
         >
-          {(courses.data?.courses ?? []).map((item) => (
+          {studentCourses.map((item) => (
             <option key={item.id} value={item.id}>
               {item.code} — {item.name}
             </option>
@@ -258,8 +186,6 @@ export function DashboardPage() {
               ))}
             </section>
           </div>
-
-          <SubmitWork courseId={courseId} />
 
           <section className="card">
             <h2 style={{ fontSize: 16, marginBottom: 10 }}>Published grades</h2>

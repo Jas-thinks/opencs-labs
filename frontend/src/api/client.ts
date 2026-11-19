@@ -1,9 +1,12 @@
 import type {
+  AddMembersResponse,
+  AssignmentInput,
   AssignmentListResponse,
   AssignmentOut,
   AttemptCreateResponse,
   AttemptOut,
   CategorySummary,
+  CourseInput,
   CourseListResponse,
   CourseOut,
   DatasetDetail,
@@ -12,23 +15,36 @@ import type {
   ExerciseDetail,
   ExerciseListResponse,
   FeedbackResponse,
+  Gradebook,
+  GradeInput,
   GradeListResponse,
   GradeOut,
   LaunchResponse,
   LessonDetail,
   LessonProgressOut,
+  MemberOut,
   MyGradesResponse,
+  NotebookDocument,
+  NotificationOut,
   OpenNotebookResponse,
   PathsResponse,
+  PostInput,
+  PostListResponse,
+  PostOut,
   PracticeProgress,
   Preferences,
   PreviewResponse,
+  QueueRow,
+  ReadersResponse,
   RosterResponse,
   RubricOut,
   ServerStateOut,
   SnippetResponse,
+  StartAssignmentOut,
   StudentDashboard,
+  StudentHome,
   StudentDrilldown,
+  SubmissionDetailOut,
   SubmissionListResponse,
   SubmissionOut,
   TeacherDashboard,
@@ -209,26 +225,64 @@ export const api = {
   // courses
   courses: () => request<CourseListResponse>("/courses"),
   course: (id: string) => request<CourseOut>(`/courses/${encodeURIComponent(id)}`),
+  createCourse: (payload: CourseInput) =>
+    request<CourseOut>("/courses", { method: "POST", body: JSON.stringify(payload) }),
+  updateCourse: (id: string, payload: CourseInput) =>
+    request<CourseOut>(`/courses/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  rotateJoinCode: (id: string) =>
+    request<CourseOut>(`/courses/${encodeURIComponent(id)}/join-code`, { method: "POST" }),
+  disableJoinCode: (id: string) =>
+    request<CourseOut>(`/courses/${encodeURIComponent(id)}/join-code`, { method: "DELETE" }),
+  joinCourse: (code: string) =>
+    request<CourseOut>("/courses/join", { method: "POST", body: JSON.stringify({ code }) }),
+  members: (id: string) =>
+    request<{ members: MemberOut[] }>(`/courses/${encodeURIComponent(id)}/members`),
+  addMembers: (id: string, emails: string[], role_in_course: string) =>
+    request<AddMembersResponse>(`/courses/${encodeURIComponent(id)}/members`, {
+      method: "POST",
+      body: JSON.stringify({ emails, role_in_course }),
+    }),
+  updateMemberRole: (id: string, userId: string, role_in_course: string) =>
+    request<MemberOut>(`/courses/${encodeURIComponent(id)}/enrollments/${encodeURIComponent(userId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role_in_course }),
+    }),
+  removeMember: (id: string, userId: string) =>
+    request<void>(`/courses/${encodeURIComponent(id)}/enrollments/${encodeURIComponent(userId)}`, {
+      method: "DELETE",
+    }),
+  gradebook: (id: string) => request<Gradebook>(`/courses/${encodeURIComponent(id)}/gradebook`),
   roster: (id: string, params: { limit?: number; offset?: number } = {}) =>
     request<RosterResponse>(`/courses/${encodeURIComponent(id)}/roster${query(params)}`),
 
   // assignments and rubrics
-  assignments: (courseId: string) =>
+  assignments: (courseId: string, params: { include_archived?: boolean } = {}) =>
     request<AssignmentListResponse>(
-      `/courses/${encodeURIComponent(courseId)}/assignments`,
+      `/courses/${encodeURIComponent(courseId)}/assignments${query(params)}`,
     ),
   assignment: (id: string) =>
     request<AssignmentOut>(`/assignments/${encodeURIComponent(id)}`),
-  createAssignment: (courseId: string, payload: Record<string, unknown>) =>
+  createAssignment: (courseId: string, payload: AssignmentInput) =>
     request<AssignmentOut>(`/courses/${encodeURIComponent(courseId)}/assignments`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  updateAssignment: (id: string, payload: Record<string, unknown>) =>
+  updateAssignment: (id: string, payload: AssignmentInput) =>
     request<AssignmentOut>(`/assignments/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
+  deleteAssignment: (id: string) =>
+    request<void>(`/assignments/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  archiveAssignment: (id: string, archived: boolean) =>
+    request<AssignmentOut>(
+      `/assignments/${encodeURIComponent(id)}/${archived ? "archive" : "unarchive"}`,
+      { method: "POST" },
+    ),
+  startAssignment: (id: string) =>
+    request<StartAssignmentOut>(`/assignments/${encodeURIComponent(id)}/start`, { method: "POST" }),
+  returnAll: (id: string) =>
+    request<{ returned: number }>(`/assignments/${encodeURIComponent(id)}/return`, { method: "POST" }),
   rubric: (assignmentId: string) =>
     request<RubricOut>(`/assignments/${encodeURIComponent(assignmentId)}/rubric`),
   upsertRubric: (assignmentId: string, payload: Record<string, unknown>) =>
@@ -251,10 +305,14 @@ export const api = {
       `/assignments/${encodeURIComponent(assignmentId)}/submissions${query(params)}`,
     ),
   submission: (id: string) =>
-    request<SubmissionOut>(`/submissions/${encodeURIComponent(id)}`),
+    request<SubmissionDetailOut>(`/submissions/${encodeURIComponent(id)}`),
   submissionNotebook: (id: string) =>
-    request<Record<string, unknown>>(`/submissions/${encodeURIComponent(id)}/notebook`),
-  gradeSubmission: (id: string, payload: Record<string, unknown>) =>
+    request<NotebookDocument>(`/submissions/${encodeURIComponent(id)}/notebook`),
+  submissionDownloadUrl: (id: string) =>
+    `${API_BASE}/submissions/${encodeURIComponent(id)}/notebook?download=1`,
+  returnSubmission: (id: string) =>
+    request<GradeOut>(`/submissions/${encodeURIComponent(id)}/return`, { method: "POST" }),
+  gradeSubmission: (id: string, payload: GradeInput) =>
     request<GradeOut>(`/submissions/${encodeURIComponent(id)}/grade`, {
       method: "POST",
       body: JSON.stringify(payload),
@@ -280,4 +338,33 @@ export const api = {
     ),
   courseExportUrl: (courseId: string) =>
     `${API_BASE}/analytics/courses/${encodeURIComponent(courseId)}/export.csv`,
+
+  // stream
+  posts: (courseId: string, params: { kind?: string; cursor?: string; limit?: number } = {}) =>
+    request<PostListResponse>(`/courses/${encodeURIComponent(courseId)}/posts${query(params)}`),
+  createPost: (courseId: string, payload: PostInput) =>
+    request<PostOut>(`/courses/${encodeURIComponent(courseId)}/posts`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updatePost: (id: string, payload: PostInput) =>
+    request<PostOut>(`/posts/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deletePost: (id: string) => request<void>(`/posts/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  markPostRead: (id: string) =>
+    request<void>(`/posts/${encodeURIComponent(id)}/read`, { method: "POST" }),
+  postReaders: (id: string) => request<ReadersResponse>(`/posts/${encodeURIComponent(id)}/readers`),
+
+  // notifications and personal views
+  notifications: (params: { unread?: boolean; cursor?: string; limit?: number } = {}) =>
+    request<{ notifications: NotificationOut[]; next_cursor: string | null }>(
+      `/me/notifications${query(params)}`,
+    ),
+  notificationCount: () => request<{ unread: number }>("/me/notifications/count"),
+  markNotificationsRead: (ids?: string[]) =>
+    request<{ unread: number }>("/me/notifications/read", {
+      method: "POST",
+      body: JSON.stringify(ids ? { ids } : {}),
+    }),
+  studentHome: () => request<StudentHome>("/me/home"),
+  gradingQueue: () => request<{ items: QueueRow[] }>("/teaching/queue"),
 };

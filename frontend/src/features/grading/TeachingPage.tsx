@@ -6,18 +6,20 @@ import { Badge, Empty, ErrorBox, Loading, Progress, formatDate } from "../../com
 
 const STAFF_ROLES = new Set(["ta", "instructor", "admin", "staff"]);
 
-export function TeachingPage() {
+/** Class analytics. Rendered as the "Insights" tab of a class (fixed course). */
+export function TeachingPage({ courseId: fixedCourseId }: { courseId?: string } = {}) {
   const courses = useAsync(() => api.courses(), []);
   const staffCourses = (courses.data?.courses ?? []).filter((course) =>
     STAFF_ROLES.has(course.role_in_course),
   );
-  const [courseId, setCourseId] = useState("");
+  const [selectedId, setCourseId] = useState("");
+  const courseId = fixedCourseId ?? selectedId;
 
   useEffect(() => {
-    if (!courseId && staffCourses.length) {
+    if (!fixedCourseId && !selectedId && staffCourses.length) {
       setCourseId(staffCourses[0].id);
     }
-  }, [courseId, staffCourses]);
+  }, [fixedCourseId, selectedId, staffCourses]);
 
   const dashboard = useAsync(
     () => (courseId ? api.courseDashboard(courseId, { limit: 100 }) : Promise.resolve(null)),
@@ -40,13 +42,14 @@ export function TeachingPage() {
     <div className="stack" style={{ gap: 22 }}>
       <header className="page-head" style={{ marginBottom: 0 }}>
         <div style={{ maxWidth: 680 }}>
-          <h1>Teaching</h1>
-          <p className="lead" style={{ marginBottom: 0 }}>
+          {!fixedCourseId && <h1>Teaching</h1>}
+          <p className={fixedCourseId ? "small dim" : "lead"} style={{ marginBottom: 0 }}>
             Class completion, score distribution, rubric averages and the grading roster.
+            Averages count returned grades only.
           </p>
         </div>
         <div className="row" style={{ gap: 10 }}>
-          <select
+          {!fixedCourseId && <select
             className="select"
             style={{ minWidth: 280 }}
             value={courseId}
@@ -57,7 +60,7 @@ export function TeachingPage() {
                 {course.code} — {course.name}
               </option>
             ))}
-          </select>
+          </select>}
           {courseId && (
             <a className="btn btn-ghost btn-sm" href={api.courseExportUrl(courseId)}>
               Export CSV
@@ -122,7 +125,7 @@ export function TeachingPage() {
                       </td>
                       <td>{formatDate(assignment.due_at)}</td>
                       <td>
-                        <Link className="btn btn-sm" to={`/assignments/${assignment.id}`}>
+                        <Link className="btn btn-sm" to={`/grade/${assignment.id}`}>
                           Grade
                         </Link>
                       </td>

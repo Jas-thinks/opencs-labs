@@ -6,6 +6,13 @@ export interface Preferences {
   default_notebook_profile?: string;
 }
 
+export interface TeachingSummary {
+  is_teacher: boolean;
+  staff_course_count: number;
+  student_course_count: number;
+  can_create_courses: boolean;
+}
+
 export interface UserOut {
   id: string;
   email: string;
@@ -13,6 +20,7 @@ export interface UserOut {
   role: Role;
   hub_username: string;
   preferences: Preferences;
+  teaching?: TeachingSummary;
 }
 
 export interface LessonProgressOut {
@@ -353,6 +361,7 @@ export interface CourseOut {
   status: string;
   description: string;
   role_in_course: CourseRole;
+  join_code?: string | null;
 }
 
 export interface CourseListResponse {
@@ -396,9 +405,42 @@ export interface AssignmentOut {
   allow_late: boolean;
   late_penalty_pct: number;
   is_published: boolean;
+  topic: string | null;
+  publish_at: string | null;
+  archived_at: string | null;
+  is_visible: boolean;
+  has_starter: boolean;
   created_by: string;
   created_at: string;
   updated_at: string;
+  submission_count: number | null;
+  my_submission: MySubmissionRef | null;
+}
+
+export interface MySubmissionRef {
+  id: string;
+  attempt_number: number;
+  status: string;
+  is_late: boolean;
+  final_score: number | null;
+  submitted_at: string;
+}
+
+export interface AssignmentInput {
+  title?: string;
+  description?: string;
+  kind?: "practice" | "project" | "exam";
+  topic?: string | null;
+  due_at?: string | null;
+  publish_at?: string | null;
+  max_points?: number;
+  weight?: number;
+  allow_late?: boolean;
+  late_penalty_pct?: number;
+  is_published?: boolean;
+  exercise_slug?: string | null;
+  starter_notebook_id?: string | null;
+  clear_starter?: boolean;
 }
 
 export interface AssignmentListResponse {
@@ -437,6 +479,7 @@ export interface SubmissionOut {
   submitted_at: string;
   graded_at: string | null;
   notebook_version: { version_number: number; sha256: string } | null;
+  has_draft?: boolean;
 }
 
 export interface SubmissionListResponse {
@@ -460,10 +503,36 @@ export interface GradeOut {
   rubric_id: string;
   total_points: number;
   final_score: number | null;
+  override_reason?: string | null;
   feedback: string;
   graded_by: string;
   published_at: string;
+  released_at?: string | null;
+  state?: "draft" | "released";
   criteria: GradeCriterionOut[];
+}
+
+export interface GradeInput {
+  criteria: { criterion_id: string; points: number; comment?: string }[];
+  feedback?: string;
+  final_score?: number | null;
+  override_reason?: string | null;
+  release?: boolean;
+}
+
+export interface SubmissionDetailOut extends SubmissionOut {
+  latest_grade: GradeOut | null;
+  rubric: RubricOut | null;
+  assignment_title: string | null;
+  max_points: number | null;
+  attempts: { id: string; attempt_number: number; submitted_at: string; is_late: boolean }[];
+}
+
+export interface StartAssignmentOut {
+  notebook_id: string;
+  title: string;
+  url: string;
+  created: boolean;
 }
 
 export interface GradeListResponse {
@@ -481,6 +550,7 @@ export interface MyGradeOut {
   max_points: number;
   published_at: string | null;
   revision: number | null;
+  feedback?: string;
 }
 
 export interface MyGradesResponse {
@@ -596,4 +666,154 @@ export interface TeacherDashboard {
   roster_total: number;
   roster_limit: number;
   roster_offset: number;
+}
+
+// --- classes, people ----------------------------------------------------
+export interface CourseInput {
+  name?: string;
+  code?: string;
+  term?: string;
+  description?: string;
+  status?: "active" | "archived";
+}
+
+export interface MemberOut {
+  user_id: string;
+  email: string;
+  display_name: string;
+  role_in_course: CourseRole;
+  joined_at: string | null;
+}
+
+export interface AddMembersResponse {
+  added: MemberOut[];
+  updated: MemberOut[];
+  unknown: string[];
+}
+
+// --- stream -------------------------------------------------------------
+export type AttachmentKind = "link" | "dataset" | "lesson" | "exercise" | "assignment";
+
+export interface AttachmentInput {
+  kind: AttachmentKind;
+  target: string;
+  label?: string;
+}
+
+export interface AttachmentOut {
+  id: string;
+  kind: string;
+  label: string;
+  url: string | null;
+  internal: boolean;
+}
+
+export interface PostOut {
+  id: string;
+  course_id: string;
+  kind: "announcement" | "material";
+  title: string;
+  body: string;
+  topic: string | null;
+  is_pinned: boolean;
+  status: "draft" | "published";
+  publish_at: string | null;
+  published_at: string | null;
+  edited_at: string | null;
+  created_at: string;
+  author: { id: string; display_name: string } | null;
+  attachments: AttachmentOut[];
+  is_read: boolean;
+  can_edit: boolean;
+  read_count: number | null;
+  audience: number | null;
+}
+
+export interface PostInput {
+  kind?: "announcement" | "material";
+  title?: string;
+  body?: string;
+  topic?: string | null;
+  is_pinned?: boolean;
+  status?: "draft" | "published";
+  publish_at?: string | null;
+  attachments?: AttachmentInput[];
+}
+
+export interface PostListResponse {
+  posts: PostOut[];
+  next_cursor: string | null;
+}
+
+export interface ReadersResponse {
+  read: { user_id: string; display_name: string; read_at: string | null }[];
+  unread: { user_id: string; display_name: string; read_at: string | null }[];
+}
+
+// --- notifications, home, teaching ---------------------------------------
+export interface NotificationOut {
+  id: string;
+  kind: string;
+  course_id: string | null;
+  title: string;
+  link: string;
+  created_at: string;
+  read_at: string | null;
+}
+
+export interface GradebookCell {
+  assignment_id: string;
+  submission_id: string | null;
+  state: "returned" | "draft" | "submitted" | "missing" | "not_submitted";
+  score: number | null;
+  is_late: boolean;
+}
+
+export interface Gradebook {
+  course_id: string;
+  assignments: { id: string; title: string; max_points: number; weight: number; due_at: string | null; is_visible: boolean }[];
+  rows: { user_id: string; display_name: string; email: string; cells: GradebookCell[]; weighted_percent: number | null }[];
+}
+
+export interface QueueRow {
+  assignment_id: string;
+  assignment_title: string;
+  course_id: string;
+  course_code: string;
+  due_at: string | null;
+  ungraded: number;
+  drafts: number;
+  late: number;
+}
+
+export interface StudentHome {
+  courses: { id: string; code: string; name: string; status: string }[];
+  due_soon: { assignment_id: string; title: string; course_id: string; course_code: string; due_at: string | null; is_overdue: boolean }[];
+  posts: { id: string; course_id: string; course_code: string; kind: string; title: string; excerpt: string; is_read: boolean; published_at: string }[];
+  feedback: { submission_id: string; assignment_id: string; assignment_title: string; course_id: string; final_score: number | null; max_points: number; released_at: string | null; has_comments: boolean }[];
+}
+
+/** Minimal nbformat v4 shape used by the read-only notebook viewer. */
+export interface NotebookDocument {
+  cells?: NotebookCell[];
+  metadata?: Record<string, unknown>;
+  nbformat?: number;
+}
+
+export interface NotebookCell {
+  cell_type: "code" | "markdown" | "raw";
+  source: string | string[];
+  execution_count?: number | null;
+  outputs?: NotebookOutput[];
+}
+
+export interface NotebookOutput {
+  output_type: "stream" | "execute_result" | "display_data" | "error";
+  name?: string;
+  text?: string | string[];
+  data?: Record<string, string | string[]>;
+  ename?: string;
+  evalue?: string;
+  traceback?: string[];
+  execution_count?: number | null;
 }

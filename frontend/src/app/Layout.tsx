@@ -1,14 +1,30 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../app/AuthContext";
 import { Badge } from "../components/ui";
+import { NotificationBell } from "../features/notifications/NotificationBell";
 
-const navItems = [
+type NavItem = { to: string; label: string; icon: string } | { section: string };
+
+// Two distinct experiences (ADR-010). Teachers never see student-only flows
+// (turn-in, progress); students never see teaching tools.
+const TEACHER_NAV: NavItem[] = [
+  { to: "/classes", label: "Classes", icon: "▥" },
+  { to: "/to-grade", label: "To grade", icon: "✓" },
+  { to: "/notebooks", label: "My notebooks", icon: "▤" },
+  { section: "Library" },
+  { to: "/learn", label: "Lessons", icon: "◈" },
+  { to: "/practice", label: "Exercises", icon: "◎" },
+  { to: "/datasets", label: "Datasets", icon: "▦" },
+];
+
+const STUDENT_NAV: NavItem[] = [
+  { to: "/home", label: "Home", icon: "⌂" },
+  { to: "/classes", label: "Classes", icon: "▥" },
   { to: "/learn", label: "Learn", icon: "◈" },
   { to: "/practice", label: "Practice", icon: "◎" },
   { to: "/notebooks", label: "Notebooks", icon: "▤" },
   { to: "/datasets", label: "Datasets", icon: "▦" },
-  { to: "/dashboard", label: "Dashboard", icon: "◫" },
-  { to: "/teaching", label: "Teaching", icon: "▥" },
+  { to: "/progress", label: "Progress", icon: "◫" },
 ];
 
 function initials(name: string): string {
@@ -21,8 +37,11 @@ function initials(name: string): string {
 }
 
 export function Layout() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, mode, setMode, canSwitch } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const navItems = mode === "teach" ? TEACHER_NAV : STUDENT_NAV;
+  const previewing = mode === "teach" && /^\/(learn|practice)/.test(location.pathname);
 
   return (
     <div className="shell">
@@ -37,8 +56,31 @@ export function Layout() {
           </div>
         </div>
 
+        {canSwitch && (
+          <div className="mode-switch" role="group" aria-label="Experience">
+            {(["teach", "learn"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                className={mode === m ? "active" : ""}
+                onClick={() => {
+                  setMode(m);
+                  navigate(m === "teach" ? "/classes" : "/home");
+                }}
+              >
+                {m === "teach" ? "Teaching" : "Learning"}
+              </button>
+            ))}
+          </div>
+        )}
+
         <nav className="nav" aria-label="Primary">
-          {navItems.map((item) => (
+          {navItems.map((item) =>
+            "section" in item ? (
+              <div key={item.section} className="nav-section">
+                {item.section}
+              </div>
+            ) : (
             <NavLink
               key={item.to}
               to={item.to}
@@ -49,7 +91,8 @@ export function Layout() {
               </span>
               {item.label}
             </NavLink>
-          ))}
+            ),
+          )}
         </nav>
 
         <div className="sidebar-foot">
@@ -61,7 +104,7 @@ export function Layout() {
                   <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {user.display_name}
                   </div>
-                  <div className="small dim">{user.role}</div>
+                  <div className="small dim">{mode === "teach" ? "Teacher" : "Student"}</div>
                 </div>
               </div>
               <button
@@ -95,9 +138,15 @@ export function Layout() {
           <div className="row" style={{ gap: 10 }}>
             <Badge tone="green">Pinned environment</Badge>
             {user && <Badge tone="accent">{user.hub_username}</Badge>}
+            {user && <NotificationBell />}
           </div>
         </header>
         <main className="page">
+          {previewing && (
+            <div className="notice notice-info small" style={{ marginBottom: 16 }}>
+              Teacher preview: this is the student-facing library. Attach lessons, exercises and datasets to a class from its Stream or Classwork.
+            </div>
+          )}
           <Outlet />
         </main>
       </div>
